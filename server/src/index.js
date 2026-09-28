@@ -177,6 +177,32 @@ export async function ensureCampaignColumns() {
   }
 }
 
+export async function ensureElectricityColumns() {
+  try {
+    const existingCols = await tableColumns('electricity');
+    const colsToAdd = [
+      { name: 'ecs', type: 'VARCHAR(100) NOT NULL DEFAULT ""' },
+      { name: 'payment_date', type: 'DATE NULL DEFAULT NULL' }
+    ];
+    for (const c of colsToAdd) {
+      if (!existingCols.has(c.name)) {
+        try {
+          await q(`ALTER TABLE electricity ADD COLUMN \`${c.name}\` ${c.type}`);
+          console.log(`[Schema Migration] Added column \`${c.name}\` to electricity table.`);
+        } catch (err) {
+          console.warn(`[Schema Migration] Notice adding electricity.\`${c.name}\`:`, err.message);
+        }
+      }
+    }
+    // Sync payment_date with paid_date if missing
+    try {
+      await q("UPDATE electricity SET payment_date = paid_date WHERE (payment_date IS NULL OR payment_date = '') AND paid_date IS NOT NULL");
+    } catch (_) {}
+  } catch (err) {
+    console.warn('[Schema Migration] ensureElectricityColumns notice:', err.message);
+  }
+}
+
 /**
  * syncSiteAvailability() – Recalculates and persists availability for ALL sites
  * based on currently active campaigns. Uses the physical panel conflict map
@@ -1431,6 +1457,8 @@ app.post('/api/import/xlsx', auth, managerOrAdmin, upload.single('file'), async 
 app.post('/api/import/electricity-xlsx', auth, managerOrAdmin, upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'No workbook provided' });
   try {
+    await ensureElectricityColumns();
+
     const wb = XLSX.readFile(req.file.path, { cellDates: true });
     if (!wb.SheetNames || wb.SheetNames.length === 0) {
       return res.status(400).json({ message: 'Excel workbook contains no sheets' });
@@ -1438,7 +1466,7 @@ app.post('/api/import/electricity-xlsx', auth, managerOrAdmin, upload.single('fi
 
     const headerKeywords = [
       'meter', 'service', 'tnumber', 't_number', 'tno',
-      'billingmonth', 'billdate', 'duedate', 'paiddate',
+      'billingmonth', 'billdate', 'duedate', 'paiddate', 'paymentdate', 'ecs',
       'units', 'provider', 'billtype', 'paymentamount', 'billamount',
       'amount', 'paymentstatus', 'paymentref', 'status',
       'sitecode', 'siteid', 'location', 'size', 'ssv', 'mb'
@@ -1481,7 +1509,7 @@ app.post('/api/import/electricity-xlsx', auth, managerOrAdmin, upload.single('fi
 
     // Load active sites and active electricity records
     const existingSites = await q(`SELECT id, site_code, area, address, size, width, height, meter_no FROM sites WHERE record_status="active"`);
-    const existingBills = await q(`SELECT id, site_id, site_code, meter_no, service_number, t_number, billing_month, due_date, amount, payment_status, location FROM electricity WHERE record_status="active"`);
+    const existingBills = await q(`SELECT id, site_id, site_code, meter_no, service_number, t_number, billing_month, due_date, amount, payment_status, location, ecs, payment_date, paid_date FROM electricity WHERE record_status="active"`);
 
     for (const cs of candidateSheets) {
       const sheetName = cs.name;
@@ -1598,8 +1626,10 @@ app.post('/api/import/electricity-xlsx', auth, managerOrAdmin, upload.single('fi
         }
 
         const rawStatus = String(getRowValue(r, ['STATUS', 'Status', 'Payment Status', 'Paid Status'], '')).trim();
-        const rawPaidDate = getRowValue(r, ['PAID DATE', 'Paid Date', 'Payment Date', 'Cleared Date'], '');
+        const rawPaidDate = getRowValue(r, ['PAYMENT DATE', 'Payment Date', 'PAID DATE', 'Paid Date', 'Cleared Date', 'Pay Date'], '');
         const paidDate = parseMysqlDate(rawPaidDate);
+        const paymentDate = paidDate;
+        const ecs = String(getRowValue(r, ['ECS', 'Ecs', 'ecs', 'ECS STATUS', 'ECS Mandate', 'ECS / AUTO DEBIT', 'ECS/NACH', 'ECS / NACH', 'NACH'], '')).trim();
         const paymentRef = String(getRowValue(r, ['PAYMENT REF', 'Payment Ref', 'Payment Reference', 'UTR', 'Ref No', 'Transaction ID', 'Cheque No'], '')).trim();
         const notes = String(getRowValue(r, ['NOTES', 'Notes', 'Remarks', 'Comments', 'Description'], '')).trim();
 
@@ -1700,7 +1730,9 @@ app.post('/api/import/electricity-xlsx', auth, managerOrAdmin, upload.single('fi
         const finalPayRef = paymentRef || matchedBill.payment_reference || '';
         const finalNotes = notes || matchedBill.notes || '';
         const finalBillDate = billDate || matchedBill.bill_date;
-        const finalPaidDate = paidDate || matchedBill.paid_date;
+        const finalPaidDate = paidDate || matchedBill.payment_date || matchedBill.paid_date;
+        const finalPaymentDate = paymentDate || matchedBill.payment_date || matchedBill.paid_date;
+        const finalEcs = ecs || matchedBill.ecs || '';
 
         await q(`UPDATE electricity SET
           site_id = ?,
@@ -1720,7 +1752,9 @@ app.post('/api/import/electricity-xlsx', auth, managerOrAdmin, upload.single('fi
           rate = ?,
           other_charges = ?,
           payment_status = ?,
+          ecs = ?,
           paid_date = ?,
+          payment_date = ?,
           payment_reference = ?,
           notes = ?,
           record_status = 'active',
@@ -1728,18 +1762,18 @@ app.post('/api/import/electricity-xlsx', auth, managerOrAdmin, upload.single('fi
           WHERE id = ?`, [
           finalSiteId || matchedBill.site_id, finalSiteCodeVal, finalLocVal, finalMeterVal, finalSizeVal, finalSrvVal, finalTVal,
           finalBillTypeVal, amount, amount, billingMonth, finalBillDate, dueDate, units, rate, otherCharges,
-          paymentStatus, finalPaidDate, finalPayRef, finalNotes, matchedBill.id
+          paymentStatus, finalEcs, finalPaidDate, finalPaymentDate, finalPayRef, finalNotes, matchedBill.id
         ]);
         updatedCount++;
       } else {
         await q(`INSERT INTO electricity (
           site_id, site_code, location, meter_no, size, service_number, t_number,
           bill_type, payment_amount, billing_month, bill_date, due_date, units, rate, other_charges,
-          amount, payment_status, paid_date, payment_reference, notes, record_status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NOW(), NOW())`, [
+          amount, payment_status, ecs, paid_date, payment_date, payment_reference, notes, record_status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NOW(), NOW())`, [
           finalSiteId, finalSiteCode, finalLocation, finalMeterNo, finalSize, finalServiceNo, finalTNumber,
           billType, amount, billingMonth, billDate, dueDate, units, rate, otherCharges,
-          amount, paymentStatus, paidDate, paymentRef, notes
+          amount, paymentStatus, ecs, paidDate, paymentDate, paymentRef, notes
         ]);
         newCount++;
       }
@@ -3605,6 +3639,9 @@ app.get('/api/:entity', auth, async (req, res) => {
           COALESCE(e.service_number, '') AS service_number,
           COALESCE(e.t_number, '') AS t_number,
           COALESCE(e.bill_type, '') AS bill_type,
+          COALESCE(e.ecs, '') AS ecs,
+          COALESCE(e.payment_date, e.paid_date) AS payment_date,
+          COALESCE(e.paid_date, e.payment_date) AS paid_date,
           IF(e.amount != 0, e.amount, COALESCE(e.payment_amount, 0)) AS amount,
           IF(e.payment_amount != 0, e.payment_amount, COALESCE(e.amount, 0)) AS payment_amount
         FROM electricity e
@@ -3655,6 +3692,8 @@ app.post('/api/:entity', auth, notViewer, async (req, res) => {
     if (req.params.entity === 'electricity') {
       if (data.amount && !data.payment_amount) data.payment_amount = data.amount;
       if (data.payment_amount && !data.amount) data.amount = data.payment_amount;
+      if (data.payment_date && !data.paid_date) data.paid_date = data.payment_date;
+      if (data.paid_date && !data.payment_date) data.payment_date = data.paid_date;
       if (!data.due_date) data.due_date = new Date().toISOString().slice(0, 10);
       if (data.site_code || data.site_id) {
         const siteRows = await q('SELECT * FROM sites WHERE id=? OR site_code=? LIMIT 1', [data.site_id || 0, data.site_code || '']);
@@ -3734,6 +3773,8 @@ app.put('/api/:entity/:id', auth, notViewer, async (req, res) => {
   if (req.params.entity === 'electricity') {
     if (data.amount && !data.payment_amount) data.payment_amount = data.amount;
     if (data.payment_amount && !data.amount) data.amount = data.payment_amount;
+    if (data.payment_date && !data.paid_date) data.paid_date = data.payment_date;
+    if (data.paid_date && !data.payment_date) data.payment_date = data.paid_date;
     if (data.site_code || data.site_id) {
       const siteRows = await q('SELECT * FROM sites WHERE id=? OR site_code=? LIMIT 1', [data.site_id || 0, data.site_code || '']);
       if (siteRows[0]) {
@@ -3921,6 +3962,7 @@ async function initDb() {
     } catch (_) {}
 
     await ensureCampaignColumns();
+    await ensureElectricityColumns();
 
     try {
       await q(`CREATE TABLE IF NOT EXISTS occupancy_records (

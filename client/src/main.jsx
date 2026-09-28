@@ -120,7 +120,7 @@ const fields = {
   sites: ['site_code','city','area','address','media_type','lighting','facing','size','width','height','ownership','availability','vendor_name','meter_no','monthly_cost','monthly_rate','latitude','longitude','maps_url','gps','notes'],
   clients: ['client_name','company','primary_contact','email','phone','billing_address','gst_number','status','notes'],
   campaigns: ['booking_code','parent_campaign','site_id','site_code','client_id','client','brand','campaign_name','booking_date','start_date','end_date','mounting_date','printing_status','mounting_status','validation_15_date','final_validation_date','revenue','vendor_cost','printing_cost','mounting_cost','electricity_cost','other_cost','invoice_required','invoice_requested','invoice_no','invoice_status','hard_copy_status','notes'],
-  electricity: ['site_id','site_code','location','meter_no','size','service_number','t_number','bill_type','payment_amount','billing_month','bill_date','due_date','units','rate','other_charges','amount','payment_status','paid_date','payment_reference','notes'],
+  electricity: ['site_id','site_code','location','meter_no','size','service_number','t_number','bill_type','payment_amount','billing_month','bill_date','due_date','units','rate','other_charges','amount','payment_status','ecs','payment_date','paid_date','payment_reference','notes'],
   vendors: ['name','service','contact_person','phone','email','cities','rating','notes','status'],
   proposals: ['proposal_code','client_id','client_name','campaign_name','proposal_date','start_date','duration_days','validity_days','discount_percent','tax_percent','subtotal','total','status','notes','terms'],
   invoices: ['campaign_id','client_id','requested_date','invoice_no','invoice_date','invoice_amount','invoice_status','hard_copy_required','hard_copy_status','courier_name','tracking_number','dispatch_date','delivered_date','payment_status','payment_date','notes']
@@ -2893,7 +2893,99 @@ function PptView() {
   const [sel, setSel] = useState({});
   const [query, setQuery] = useState('');
   const [areaFilter, setAreaFilter] = useState('');
-  const [dateFilter, setDateFilter] = useState('');
+  const [selectedDates, setSelectedDates] = useState([]);
+  const [dateInputVal, setDateInputVal] = useState('');
+  const [showDateModal, setShowDateModal] = useState(false);
+  const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date().getMonth());
+  const [rangeStart, setRangeStart] = useState('');
+  const [rangeEnd, setRangeEnd] = useState('');
+  const dateFilter = selectedDates[0] || '';
+  const setDateFilter = (val) => {
+    if (!val) {
+      setSelectedDates([]);
+      setDateInputVal('');
+    } else {
+      setSelectedDates([val]);
+      setDateInputVal(val);
+    }
+  };
+
+  function addDate(iso) {
+    if (!iso) return;
+    setSelectedDates(prev => prev.includes(iso) ? prev : [...prev, iso].sort());
+  }
+
+  function removeDate(iso) {
+    setSelectedDates(prev => prev.filter(d => d !== iso));
+  }
+
+  function toggleDate(iso) {
+    if (!iso) return;
+    setSelectedDates(prev => prev.includes(iso) ? prev.filter(d => d !== iso) : [...prev, iso].sort());
+  }
+
+  function clearAllDates() {
+    setSelectedDates([]);
+    setDateInputVal('');
+  }
+
+  function addDateRange(startStr, endStr) {
+    if (!startStr || !endStr) return;
+    const start = parseDay(startStr);
+    const end = parseDay(endStr);
+    if (!start || !end) return;
+    if (start > end) {
+      alert('Start date must be before or equal to End date');
+      return;
+    }
+    const toAdd = [];
+    const curr = new Date(start.getTime());
+    let count = 0;
+    while (curr <= end && count < 180) {
+      const iso = `${curr.getFullYear()}-${String(curr.getMonth() + 1).padStart(2, '0')}-${String(curr.getDate()).padStart(2, '0')}`;
+      toAdd.push(iso);
+      curr.setDate(curr.getDate() + 1);
+      count++;
+    }
+    setSelectedDates(prev => {
+      const set = new Set([...prev, ...toAdd]);
+      return Array.from(set).sort();
+    });
+  }
+
+  function addPreset(type) {
+    const now = new Date();
+    if (type === 'today') {
+      const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+      addDate(iso);
+    } else if (type === 'tomorrow') {
+      const tom = new Date(now.getTime() + 86400000);
+      const iso = `${tom.getFullYear()}-${String(tom.getMonth() + 1).padStart(2, '0')}-${String(tom.getDate()).padStart(2, '0')}`;
+      addDate(iso);
+    } else if (type === 'next7') {
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(now.getTime() + i * 86400000);
+        addDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+      }
+    } else if (type === 'next15') {
+      for (let i = 0; i < 15; i++) {
+        const d = new Date(now.getTime() + i * 86400000);
+        addDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+      }
+    } else if (type === 'nextMonth1st') {
+      const d = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      addDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+    } else if (type === 'nextMonth15th') {
+      const d = new Date(now.getFullYear(), now.getMonth() + 1, 15);
+      addDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+    } else if (type === 'nextMonthBoth') {
+      const d1 = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const d2 = new Date(now.getFullYear(), now.getMonth() + 1, 15);
+      addDate(`${d1.getFullYear()}-${String(d1.getMonth() + 1).padStart(2, '0')}-${String(d1.getDate()).padStart(2, '0')}`);
+      addDate(`${d2.getFullYear()}-${String(d2.getMonth() + 1).padStart(2, '0')}-${String(d2.getDate()).padStart(2, '0')}`);
+    }
+  }
   const [generating, setGenerating] = useState(false);
   const [pptName, setPptName] = useState(() => getTodayPptDateStr());
   const [alsoGenerateExcel, setAlsoGenerateExcel] = useState(true);
@@ -2972,37 +3064,14 @@ function PptView() {
     return null;
   }
 
-  function resolveSiteAvailability(s, v = {}, campaignsBySiteCode = {}, campaignMap = {}, dateFilter = '') {
+  function resolveSiteAvailability(s, v = {}, campaignsBySiteCode = {}, campaignMap = {}, dateFilterOrDates = '') {
     const siteCode = s?.site_code || '';
+    const dateArray = Array.isArray(dateFilterOrDates)
+      ? dateFilterOrDates.filter(Boolean)
+      : (dateFilterOrDates ? [dateFilterOrDates] : (selectedDates && selectedDates.length > 0 ? selectedDates : []));
+    const hasDates = dateArray.length > 0;
 
-    // 1. Automated Tracker evaluation
-    const activeCamp = getActiveCampaignOnDate(campaignsBySiteCode, siteCode, dateFilter);
-    const todayCamp = !dateFilter ? getActiveCampaignOnDate(campaignsBySiteCode, siteCode, '') : null;
-    const latestCamp = campaignMap[String(siteCode || '').toUpperCase().trim()] || (campaignsBySiteCode[String(siteCode || '').toUpperCase().trim()] || [])[0];
-    const autoCamp = activeCamp || todayCamp;
-    const hasAuto = !!autoCamp;
-
-    let autoEndDateStr = '';
-    let autoStartDateStr = '';
-    let autoDurationStr = '';
-    let autoCampName = '';
-    let autoClientName = '';
-    let autoEndDay = null;
-
-    if (autoCamp) {
-      if (autoCamp.end_date) {
-        autoEndDateStr = fmtDate(autoCamp.end_date);
-        autoEndDay = parseDay(autoCamp.end_date);
-      }
-      if (autoCamp.start_date || autoCamp.booking_date) {
-        autoStartDateStr = fmtDate(autoCamp.start_date || autoCamp.booking_date);
-      }
-      autoDurationStr = getCampaignDurationString(autoCamp);
-      autoCampName = autoCamp.display || autoCamp.campaign_name || autoCamp.brand || autoCamp.parent_campaign || '';
-      autoClientName = autoCamp.client || autoCamp.client_name || '';
-    }
-
-    // 2. Manual date & availability evaluation
+    // 1. Manual date & availability evaluation
     const siteStoredAvail = String(s?.ppt_availability || s?.availability || '').trim();
     const manualDateInput = v.manualDate;
     const manualTextInput = v.availability;
@@ -3023,27 +3092,24 @@ function PptView() {
 
     // If user explicitly provided manualDate or manual text, user override applies
     const hasUserManualOverride = v.manualDate !== undefined || (v.availability !== undefined && v.availability !== '');
-    const isAuto = !hasUserManualOverride && hasAuto;
 
-    // Effective End Date & Day
-    const effectiveEndDate = isAuto ? autoEndDateStr : (manualDateFmt || (hasUserManualOverride ? '' : autoEndDateStr));
-    const effectiveEndDay = isAuto ? autoEndDay : manualDateObj;
+    // 2. Active campaign lookup
+    const latestCamp = campaignMap[String(siteCode || '').toUpperCase().trim()] || (campaignsBySiteCode[String(siteCode || '').toUpperCase().trim()] || [])[0];
+    const todayCamp = getActiveCampaignOnDate(campaignsBySiteCode, siteCode, '');
 
-    // Evaluation against dateFilter (📅 Select Date filter at top)
-    const filterDay = dateFilter ? parseDay(dateFilter) : null;
+    let activeCamp = null;
+    let occupiedDates = [];
+    let vacantDates = [];
     let isBooked = false;
 
-    if (filterDay) {
-      if (isAuto) {
-        isBooked = !!activeCamp;
-      } else if (effectiveEndDay) {
-        isBooked = filterDay <= effectiveEndDay;
-      } else {
-        const checkText = String(manualTextInput !== undefined ? manualTextInput : siteStoredAvail).toLowerCase();
-        isBooked = checkText.startsWith('booked') || checkText.startsWith('occupied');
-      }
-    } else {
-      if (isAuto) {
+    if (!hasDates) {
+      // No date filter active -> evaluate today
+      activeCamp = todayCamp;
+      const hasAuto = !hasUserManualOverride && !!activeCamp;
+      const effectiveEndDate = hasAuto ? (activeCamp.end_date ? fmtDate(activeCamp.end_date) : '') : (manualDateFmt || (hasUserManualOverride ? '' : (latestCamp?.end_date ? fmtDate(latestCamp.end_date) : '')));
+      const effectiveEndDay = hasAuto ? (activeCamp.end_date ? parseDay(activeCamp.end_date) : null) : manualDateObj;
+
+      if (hasAuto) {
         isBooked = true;
       } else if (effectiveEndDay) {
         const today = parseDay(new Date());
@@ -3052,24 +3118,128 @@ function PptView() {
         const checkText = String(manualTextInput !== undefined ? manualTextInput : siteStoredAvail).toLowerCase();
         isBooked = checkText.startsWith('booked') || checkText.startsWith('occupied') || String(s?.availability || '').toLowerCase() === 'booked';
       }
-    }
 
-    // Default availability text
-    let defaultAvailText = 'Available';
-    if (filterDay) {
+      let defaultAvailText = 'Available';
       if (isBooked) {
-        defaultAvailText = effectiveEndDate ? `Booked till ${effectiveEndDate}` : 'Occupied';
+        defaultAvailText = effectiveEndDate ? `Booked till ${effectiveEndDate}` : (siteStoredAvail || 'Occupied');
       } else {
         defaultAvailText = 'Available';
       }
-    } else if (isBooked) {
-      if (effectiveEndDate) {
-        defaultAvailText = `Booked till ${effectiveEndDate}`;
+
+      const autoCamp = hasAuto ? activeCamp : null;
+      let autoEndDateStr = autoCamp?.end_date ? fmtDate(autoCamp.end_date) : '';
+      let autoStartDateStr = (autoCamp?.start_date || autoCamp?.booking_date) ? fmtDate(autoCamp.start_date || autoCamp.booking_date) : '';
+      let autoDurationStr = autoCamp ? getCampaignDurationString(autoCamp) : '';
+      let autoCampName = autoCamp?.display || autoCamp?.campaign_name || autoCamp?.brand || autoCamp?.parent_campaign || '';
+      let autoClientName = autoCamp?.client || autoCamp?.client_name || '';
+
+      const currentAvailText = manualTextInput !== undefined ? manualTextInput : defaultAvailText;
+      const finalBooked = isBooked ||
+        String(currentAvailText).toLowerCase().startsWith('booked') ||
+        String(currentAvailText).toLowerCase().startsWith('occupied');
+
+      let manualDurationStr = '';
+      if (!hasAuto && manualDateObj) {
+        const today = parseDay(new Date());
+        if (today && manualDateObj >= today) {
+          const diff = Math.max(1, Math.round((manualDateObj.getTime() - today.getTime()) / 86400000) + 1);
+          manualDurationStr = `${diff} day${diff === 1 ? '' : 's'}`;
+        }
+      }
+
+      return {
+        isAuto: hasAuto,
+        hasAuto,
+        hasTrackerBooking: hasAuto && !!(autoCamp && (autoCamp.campaign_name || autoCamp.display || autoCamp.client || autoCamp.client_name || autoCamp.end_date)),
+        hasManual: !!manualDateObj,
+        isBooked: finalBooked,
+        activeCamp: hasAuto ? autoCamp : (latestCamp || null),
+        campaignName: hasAuto ? autoCampName : (v.campaignName || ''),
+        clientName: hasAuto ? autoClientName : (v.clientName || ''),
+        durationStr: hasAuto ? autoDurationStr : (v.duration || manualDurationStr),
+        startDateStr: hasAuto ? autoStartDateStr : (v.startDate || ''),
+        endDateStr: effectiveEndDate,
+        autoEndDateStr,
+        manualDateFmt,
+        manualDateIso,
+        availText: currentAvailText,
+        defaultAvailText,
+        availBadge: '',
+        occupiedDates: [],
+        vacantDates: [],
+        datesCount: 0
+      };
+    }
+
+    // Has dates evaluated!
+    let firstActiveCamp = null;
+    for (const dStr of dateArray) {
+      const camp = getActiveCampaignOnDate(campaignsBySiteCode, siteCode, dStr);
+      let isOccOnD = false;
+      if (hasUserManualOverride) {
+        if (manualDateObj) {
+          const fDay = parseDay(dStr);
+          isOccOnD = !!(fDay && fDay <= manualDateObj);
+        } else {
+          const checkText = String(manualTextInput).toLowerCase();
+          isOccOnD = checkText.startsWith('booked') || checkText.startsWith('occupied');
+        }
       } else {
-        defaultAvailText = siteStoredAvail || 'Occupied';
+        if (camp) {
+          isOccOnD = true;
+          if (!firstActiveCamp) firstActiveCamp = camp;
+        } else if (manualDateObj) {
+          const fDay = parseDay(dStr);
+          isOccOnD = !!(fDay && fDay <= manualDateObj);
+        } else {
+          isOccOnD = false;
+        }
+      }
+      if (isOccOnD) {
+        occupiedDates.push(dStr);
+      } else {
+        vacantDates.push(dStr);
+      }
+    }
+
+    isBooked = occupiedDates.length > 0;
+    activeCamp = firstActiveCamp || (isBooked ? latestCamp : null);
+    const hasAuto = !hasUserManualOverride && !!activeCamp;
+    const isAuto = hasAuto;
+
+    let autoEndDateStr = activeCamp?.end_date ? fmtDate(activeCamp.end_date) : '';
+    let autoStartDateStr = (activeCamp?.start_date || activeCamp?.booking_date) ? fmtDate(activeCamp.start_date || activeCamp.booking_date) : '';
+    let autoDurationStr = activeCamp ? getCampaignDurationString(activeCamp) : '';
+    let autoCampName = activeCamp?.display || activeCamp?.campaign_name || activeCamp?.brand || activeCamp?.parent_campaign || '';
+    let autoClientName = activeCamp?.client || activeCamp?.client_name || '';
+
+    const effectiveEndDate = isAuto ? autoEndDateStr : (manualDateFmt || (hasUserManualOverride ? '' : autoEndDateStr));
+
+    let defaultAvailText = 'Available';
+    let availBadge = '';
+
+    if (dateArray.length === 1) {
+      const singleDate = dateArray[0];
+      const singleFmt = fmtDate(singleDate) || singleDate;
+      if (isBooked) {
+        defaultAvailText = effectiveEndDate ? `Booked till ${effectiveEndDate}` : 'Occupied';
+        availBadge = `🔒 Occupied on ${singleFmt}`;
+      } else {
+        defaultAvailText = 'Available';
+        availBadge = `✓ Available on ${singleFmt}`;
       }
     } else {
-      defaultAvailText = 'Available';
+      if (!isBooked) {
+        defaultAvailText = 'Available';
+        availBadge = `✓ Available on all ${dateArray.length} dates`;
+      } else if (occupiedDates.length === dateArray.length) {
+        defaultAvailText = effectiveEndDate ? `Booked till ${effectiveEndDate}` : `Occupied on all ${dateArray.length} dates`;
+        availBadge = `🔒 Occupied on all ${dateArray.length} dates`;
+      } else {
+        const occFmt = occupiedDates.map(d => fmtDate(d) || d).join(', ');
+        defaultAvailText = `Booked on ${occFmt}`;
+        availBadge = `🔒 Occupied on ${occupiedDates.length}/${dateArray.length} dates (${occFmt})`;
+      }
     }
 
     const currentAvailText = manualTextInput !== undefined ? manualTextInput : defaultAvailText;
@@ -3077,7 +3247,6 @@ function PptView() {
       String(currentAvailText).toLowerCase().startsWith('booked') ||
       String(currentAvailText).toLowerCase().startsWith('occupied');
 
-    // Manual duration if start & end exist
     let manualDurationStr = '';
     if (!isAuto && manualDateObj) {
       const today = parseDay(new Date());
@@ -3087,15 +3256,13 @@ function PptView() {
       }
     }
 
-    const hasTrackerBooking = hasAuto && !!(autoCamp && (autoCamp.campaign_name || autoCamp.display || autoCamp.client || autoCamp.client_name || autoCamp.end_date));
-
     return {
       isAuto,
       hasAuto,
-      hasTrackerBooking,
+      hasTrackerBooking: hasAuto && !!(activeCamp && (activeCamp.campaign_name || activeCamp.display || activeCamp.client || activeCamp.client_name || activeCamp.end_date)),
       hasManual: !!manualDateObj,
       isBooked: finalBooked,
-      activeCamp: isAuto ? autoCamp : (latestCamp || null),
+      activeCamp: isAuto ? activeCamp : (latestCamp || null),
       campaignName: isAuto ? autoCampName : (v.campaignName || ''),
       clientName: isAuto ? autoClientName : (v.clientName || ''),
       durationStr: isAuto ? autoDurationStr : (v.duration || manualDurationStr),
@@ -3105,7 +3272,11 @@ function PptView() {
       manualDateFmt,
       manualDateIso,
       availText: currentAvailText,
-      defaultAvailText
+      defaultAvailText,
+      availBadge,
+      occupiedDates,
+      vacantDates,
+      datesCount: dateArray.length
     };
   }
 
@@ -3249,8 +3420,8 @@ function PptView() {
           valB = Number(b.ppt_rate || b.monthly_rate || 0);
         }
         if (sortState.key === 'availability') {
-          const infoA = resolveSiteAvailability(a, sel[a.id || a.site_code] || {}, campaignsBySiteCode, campaignMap, dateFilter);
-          const infoB = resolveSiteAvailability(b, sel[b.id || b.site_code] || {}, campaignsBySiteCode, campaignMap, dateFilter);
+          const infoA = resolveSiteAvailability(a, sel[a.id || a.site_code] || {}, campaignsBySiteCode, campaignMap, selectedDates);
+          const infoB = resolveSiteAvailability(b, sel[b.id || b.site_code] || {}, campaignsBySiteCode, campaignMap, selectedDates);
           valA = infoA.isBooked ? 'Occupied' : 'Available';
           valB = infoB.isBooked ? 'Occupied' : 'Available';
         }
@@ -3259,7 +3430,7 @@ function PptView() {
       return 0;
     });
     return list;
-  }, [sites, query, areaFilter, dateFilter, campaignsBySiteCode, sortState, sel]);
+  }, [sites, query, areaFilter, selectedDates, campaignsBySiteCode, sortState, sel]);
 
   async function uploadPage(k, file) {
     if (!file) return;
@@ -3777,7 +3948,7 @@ function PptView() {
 
       const rows = targetSites.map((x, idx) => {
         const v = sel[x.id || x.site_code] || {};
-        const info = resolveSiteAvailability(x, v, campaignsBySiteCode, campaignMap, dateFilter);
+        const info = resolveSiteAvailability(x, v, campaignsBySiteCode, campaignMap, selectedDates);
 
         let w = x.width || '', h = x.height || '';
         if ((!w || !h) && x.size) {
@@ -3820,7 +3991,7 @@ function PptView() {
       .filter(s => sel[s.id || s.site_code]?.checked)
       .map(s => {
         const v = sel[s.id || s.site_code] || {};
-        const info = resolveSiteAvailability(s, v, campaignsBySiteCode, campaignMap, dateFilter);
+        const info = resolveSiteAvailability(s, v, campaignsBySiteCode, campaignMap, selectedDates);
 
         return {
           ...s,
@@ -4203,22 +4374,55 @@ function PptView() {
               )}
             </div>
 
-            {/* Date Availability Filter */}
-            <div className={`scooh-ppt-filter-pill ${dateFilter ? 'active-sky' : ''}`}>
-              <span style={{ fontSize: '11px', color: dateFilter ? '#38bdf8' : '#94a3b8', fontWeight: 700 }}>📅 Date:</span>
+            {/* Date Availability Filter with Multi-Select */}
+            <div className={`scooh-ppt-filter-pill ${selectedDates.length > 0 ? 'active-sky' : ''}`} style={{ gap: '5px' }}>
+              <span style={{ fontSize: '11px', color: selectedDates.length > 0 ? '#38bdf8' : '#94a3b8', fontWeight: 700 }}>
+                📅 {selectedDates.length > 1 ? `Dates (${selectedDates.length}):` : 'Date:'}
+              </span>
               <input
                 id="scooh-ppt-date-filter"
                 type="date"
-                value={dateFilter}
-                onChange={e => setDateFilter(e.target.value)}
-                title="Evaluate site availability as of this date"
+                value={dateInputVal}
+                onChange={e => {
+                  const val = e.target.value;
+                  setDateInputVal(val);
+                  if (val) addDate(val);
+                }}
+                title="Select date or add another date"
+                style={{ width: '110px' }}
               />
-              {dateFilter && (
+              <button
+                type="button"
+                onClick={() => setShowDateModal(true)}
+                style={{
+                  background: selectedDates.length > 1 ? 'rgba(56, 189, 248, 0.25)' : 'rgba(255,255,255,0.08)',
+                  border: `1px solid ${selectedDates.length > 1 ? '#38bdf8' : 'rgba(255,255,255,0.18)'}`,
+                  borderRadius: '5px',
+                  color: selectedDates.length > 0 ? '#38bdf8' : '#cbd5e1',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  height: '24px'
+                }}
+                title="Open interactive multi-date calendar, presets & range selector"
+              >
+                <span>🗓️ Multi-Date</span>
+                {selectedDates.length > 0 && (
+                  <span style={{ background: '#38bdf8', color: '#031726', borderRadius: '10px', fontSize: '10px', fontWeight: 900, padding: '0 5px', lineHeight: '14px' }}>
+                    {selectedDates.length}
+                  </span>
+                )}
+              </button>
+              {selectedDates.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setDateFilter('')}
+                  onClick={clearAllDates}
                   style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '12px', padding: '0 2px', lineHeight: 1 }}
-                  title="Reset date"
+                  title="Clear all selected dates"
                 >
                   ✕
                 </button>
@@ -4267,14 +4471,14 @@ function PptView() {
             </div>
 
             {/* Reset Filters */}
-            {(query || areaFilter || dateFilter) && (
+            {(query || areaFilter || selectedDates.length > 0) && (
               <button
                 type="button"
                 className="scooh-btn ghost"
                 onClick={() => {
                   setQuery('');
                   setAreaFilter('');
-                  setDateFilter('');
+                  clearAllDates();
                 }}
                 style={{
                   height: '36px',
@@ -4429,19 +4633,68 @@ function PptView() {
           </div>
         </div>
 
-        {/* Dynamic Date Availability Note (Small badge if active) */}
-        {dateFilter && (
-          <div className="scooh-ppt-date-banner" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.25)', borderRadius: '8px', padding: '6px 12px', margin: '0 0 10px', fontSize: '11.5px', color: '#38bdf8' }}>
-            <span style={{ fontSize: '14px' }}>📅</span>
-            <span>
-              Evaluating site availability as of <strong>{formatDate(dateFilter) || dateFilter}</strong>. Sites whose campaign ends before this date show as <strong>Available</strong>.
+        {/* Dynamic Multi-Date Availability Banner & Date Chips */}
+        {selectedDates.length > 0 && (
+          <div className="scooh-ppt-date-banner" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', background: 'rgba(56, 189, 248, 0.08)', border: '1px solid rgba(56, 189, 248, 0.25)', borderRadius: '8px', padding: '8px 12px', margin: '0 0 12px', fontSize: '12px', color: '#38bdf8' }}>
+            <span style={{ fontSize: '15px' }}>📅</span>
+            <span style={{ fontWeight: 600 }}>
+              {selectedDates.length === 1 ? (
+                <>Evaluating availability as of <strong>{fmtDate(selectedDates[0]) || selectedDates[0]}</strong>:</>
+              ) : (
+                <>Evaluating availability across <strong>{selectedDates.length} selected dates</strong>:</>
+              )}
             </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+              {selectedDates.map(d => (
+                <span
+                  key={d}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    background: 'rgba(14, 165, 233, 0.18)',
+                    border: '1px solid rgba(56, 189, 248, 0.45)',
+                    borderRadius: '5px',
+                    padding: '2px 7px',
+                    fontSize: '11.5px',
+                    color: '#e0f2fe',
+                    fontWeight: 700
+                  }}
+                >
+                  {fmtDate(d) || d}
+                  <button
+                    type="button"
+                    onClick={() => removeDate(d)}
+                    style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '11px', padding: '0 1px', lineHeight: 1 }}
+                    title={`Remove ${fmtDate(d) || d}`}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
             <button
               type="button"
-              onClick={() => setDateFilter('')}
+              onClick={() => setShowDateModal(true)}
+              style={{
+                background: 'rgba(56, 189, 248, 0.15)',
+                border: '1px solid rgba(56, 189, 248, 0.35)',
+                borderRadius: '5px',
+                color: '#7dd3fc',
+                cursor: 'pointer',
+                fontSize: '11px',
+                fontWeight: 700,
+                padding: '2px 8px'
+              }}
+            >
+              + Add / Edit Dates
+            </button>
+            <button
+              type="button"
+              onClick={clearAllDates}
               style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '11px', fontWeight: 700, textDecoration: 'underline' }}
             >
-              Reset Date
+              Reset All Dates
             </button>
           </div>
         )}
@@ -4453,7 +4706,7 @@ function PptView() {
             const v = sel[siteKey] || {};
             const isChecked = !!v.checked;
             const imgs = s.ppt_images || [];
-            const info = resolveSiteAvailability(s, v, campaignsBySiteCode, campaignMap, dateFilter);
+            const info = resolveSiteAvailability(s, v, campaignsBySiteCode, campaignMap, selectedDates);
             const isBooked = info.isBooked;
             const campaignName = info.campaignName;
             const clientName = info.clientName;
@@ -4868,9 +5121,9 @@ function PptView() {
                       </div>
                     )}
 
-                    {dateFilter && (
+                    {selectedDates.length > 0 && (
                       <span style={{ color: info.isBooked ? '#fbbf24' : '#4ade80', fontWeight: 600 }}>
-                        {info.isBooked ? `🔒 Occupied on ${formatDate(dateFilter) || dateFilter}` : `✓ Available on ${formatDate(dateFilter) || dateFilter}`}
+                        {info.availBadge}
                       </span>
                     )}
                   </div>
@@ -4970,13 +5223,13 @@ function PptView() {
                 style={{ fontSize: '11px', padding: '3px 9px', minHeight: '26px', color: '#4ade80', borderColor: 'rgba(74, 222, 128, 0.3)' }}
                 onClick={() => {
                   const vac = sites.filter(s => {
-                    const info = resolveSiteAvailability(s, sel[s.id || s.site_code] || {}, campaignsBySiteCode, campaignMap, dateFilter);
+                    const info = resolveSiteAvailability(s, sel[s.id || s.site_code] || {}, campaignsBySiteCode, campaignMap, selectedDates);
                     return !info.isBooked;
                   });
                   setMultiSelectInput(vac.map(s => s.site_code).join(', '));
                 }}
               >
-                🟢 All Vacant Sites ({sites.filter(s => !resolveSiteAvailability(s, sel[s.id || s.site_code] || {}, campaignsBySiteCode, campaignMap, dateFilter).isBooked).length})
+                🟢 All Vacant Sites ({sites.filter(s => !resolveSiteAvailability(s, sel[s.id || s.site_code] || {}, campaignsBySiteCode, campaignMap, selectedDates).isBooked).length})
               </button>
               <button
                 type="button"
@@ -4984,13 +5237,13 @@ function PptView() {
                 style={{ fontSize: '11px', padding: '3px 9px', minHeight: '26px', color: '#fbbf24', borderColor: 'rgba(251, 191, 36, 0.3)' }}
                 onClick={() => {
                   const occ = sites.filter(s => {
-                    const info = resolveSiteAvailability(s, sel[s.id || s.site_code] || {}, campaignsBySiteCode, campaignMap, dateFilter);
+                    const info = resolveSiteAvailability(s, sel[s.id || s.site_code] || {}, campaignsBySiteCode, campaignMap, selectedDates);
                     return info.isBooked;
                   });
                   setMultiSelectInput(occ.map(s => s.site_code).join(', '));
                 }}
               >
-                🟡 All Occupied Sites ({sites.filter(s => resolveSiteAvailability(s, sel[s.id || s.site_code] || {}, campaignsBySiteCode, campaignMap, dateFilter).isBooked).length})
+                🟡 All Occupied Sites ({sites.filter(s => resolveSiteAvailability(s, sel[s.id || s.site_code] || {}, campaignsBySiteCode, campaignMap, selectedDates).isBooked).length})
               </button>
               <button
                 type="button"
@@ -5115,6 +5368,380 @@ function PptView() {
               >
                 + Add to Selection ({parsedMultiSites.matched.length})
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal for Multi-Date Selection & Interactive Calendar ── */}
+      {showDateModal && (
+        <div
+          className="scooh-modal-backdrop"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            background: 'rgba(0,0,0,0.85)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+          onClick={() => setShowDateModal(false)}
+        >
+          <div
+            className="scooh-panel"
+            style={{
+              width: '100%',
+              maxWidth: '740px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              border: '1px solid #38bdf8',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.8), 0 0 25px rgba(56, 189, 248, 0.15)',
+              background: '#071224',
+              padding: '22px',
+              borderRadius: '14px',
+              color: '#f8fafc'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #1e293b', paddingBottom: '14px', marginBottom: '16px' }}>
+              <div>
+                <h3 style={{ margin: 0, color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '18px', fontWeight: 800 }}>
+                  <span style={{ color: '#38bdf8' }}>📅</span>
+                  <span>Select Multiple Dates for Site Availability</span>
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>
+                  Click days on the calendar to toggle them, add date ranges, or pick presets. Sites will be evaluated against all selected dates.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="scooh-btn ghost"
+                onClick={() => setShowDateModal(false)}
+                style={{ padding: '4px 10px', fontSize: '14px', minHeight: '30px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Quick Presets Bar */}
+            <div style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Quick Presets:</span>
+              <button
+                type="button"
+                className="scooh-btn ghost"
+                style={{ fontSize: '11px', padding: '3px 8px', minHeight: '26px', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.3)' }}
+                onClick={() => addPreset('today')}
+              >
+                + Today
+              </button>
+              <button
+                type="button"
+                className="scooh-btn ghost"
+                style={{ fontSize: '11px', padding: '3px 8px', minHeight: '26px', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.3)' }}
+                onClick={() => addPreset('tomorrow')}
+              >
+                + Tomorrow
+              </button>
+              <button
+                type="button"
+                className="scooh-btn ghost"
+                style={{ fontSize: '11px', padding: '3px 8px', minHeight: '26px', color: '#c084fc', borderColor: 'rgba(192, 132, 252, 0.3)' }}
+                onClick={() => addPreset('next7')}
+              >
+                + Next 7 Days
+              </button>
+              <button
+                type="button"
+                className="scooh-btn ghost"
+                style={{ fontSize: '11px', padding: '3px 8px', minHeight: '26px', color: '#c084fc', borderColor: 'rgba(192, 132, 252, 0.3)' }}
+                onClick={() => addPreset('next15')}
+              >
+                + Next 15 Days
+              </button>
+              <button
+                type="button"
+                className="scooh-btn ghost"
+                style={{ fontSize: '11px', padding: '3px 8px', minHeight: '26px', color: '#34d399', borderColor: 'rgba(52, 211, 153, 0.3)' }}
+                onClick={() => addPreset('nextMonth1st')}
+              >
+                + 1st Next Month
+              </button>
+              <button
+                type="button"
+                className="scooh-btn ghost"
+                style={{ fontSize: '11px', padding: '3px 8px', minHeight: '26px', color: '#34d399', borderColor: 'rgba(52, 211, 153, 0.3)' }}
+                onClick={() => addPreset('nextMonth15th')}
+              >
+                + 15th Next Month
+              </button>
+              <button
+                type="button"
+                className="scooh-btn ghost"
+                style={{ fontSize: '11px', padding: '3px 8px', minHeight: '26px', color: '#fbbf24', borderColor: 'rgba(251, 191, 36, 0.3)' }}
+                onClick={() => addPreset('nextMonthBoth')}
+              >
+                + 1st & 15th Next Mo
+              </button>
+            </div>
+
+            {/* Main Body: Grid with Calendar and Range/Chip Manager */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(290px, 340px) 1fr', gap: '16px', marginBottom: '16px' }}>
+              {/* Left Column: Interactive Month Calendar */}
+              <div style={{ background: '#0a1628', border: '1px solid #1e293b', borderRadius: '10px', padding: '14px' }}>
+                {/* Month Navigator */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (calendarMonth === 0) {
+                        setCalendarMonth(11);
+                        setCalendarYear(y => y - 1);
+                      } else {
+                        setCalendarMonth(m => m - 1);
+                      }
+                    }}
+                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid #334155', borderRadius: '5px', color: '#cbd5e1', cursor: 'pointer', padding: '3px 8px', fontSize: '12px' }}
+                    title="Previous Month"
+                  >
+                    ◀ Prev
+                  </button>
+                  <span style={{ fontSize: '13px', fontWeight: 800, color: '#f8fafc' }}>
+                    {new Date(calendarYear, calendarMonth, 1).toLocaleString('default', { month: 'long', year: 'numeric' })}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (calendarMonth === 11) {
+                        setCalendarMonth(0);
+                        setCalendarYear(y => y + 1);
+                      } else {
+                        setCalendarMonth(m => m + 1);
+                      }
+                    }}
+                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid #334155', borderRadius: '5px', color: '#cbd5e1', cursor: 'pointer', padding: '3px 8px', fontSize: '12px' }}
+                    title="Next Month"
+                  >
+                    Next ▶
+                  </button>
+                </div>
+
+                {/* Day of Week Headers */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '3px', textAlign: 'center', marginBottom: '6px' }}>
+                  {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => (
+                    <div key={d} style={{ fontSize: '10px', fontWeight: 800, color: '#64748b', textTransform: 'uppercase' }}>
+                      {d}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Days Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' }}>
+                  {(() => {
+                    const firstDay = new Date(calendarYear, calendarMonth, 1).getDay();
+                    const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+                    const cells = [];
+                    for (let i = 0; i < firstDay; i++) {
+                      cells.push(<div key={`empty-${i}`} style={{ height: '32px' }} />);
+                    }
+                    const now = new Date();
+                    const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                    for (let day = 1; day <= daysInMonth; day++) {
+                      const iso = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                      const isSel = selectedDates.includes(iso);
+                      const isToday = iso === todayIso;
+                      cells.push(
+                        <button
+                          key={iso}
+                          type="button"
+                          onClick={() => toggleDate(iso)}
+                          style={{
+                            height: '32px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: '6px',
+                            border: isSel ? '1.5px solid #38bdf8' : (isToday ? '1px solid #f59e0b' : '1px solid transparent'),
+                            background: isSel ? 'linear-gradient(135deg, #0284c7, #6366f1)' : (isToday ? 'rgba(245, 158, 11, 0.12)' : 'rgba(255,255,255,0.03)'),
+                            color: isSel ? '#ffffff' : (isToday ? '#fbbf24' : '#cbd5e1'),
+                            fontWeight: isSel ? 800 : (isToday ? 700 : 500),
+                            fontSize: '11.5px',
+                            cursor: 'pointer',
+                            transition: 'all 0.12s ease',
+                            padding: 0
+                          }}
+                          title={`${iso}${isSel ? ' (Selected - click to remove)' : ' (Click to select)'}`}
+                        >
+                          {day}
+                        </button>
+                      );
+                    }
+                    return cells;
+                  })()}
+                </div>
+
+                <div style={{ marginTop: '10px', fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>👆 Click day to toggle selection</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const now = new Date();
+                      setCalendarYear(now.getFullYear());
+                      setCalendarMonth(now.getMonth());
+                    }}
+                    style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', fontSize: '11px', padding: 0 }}
+                  >
+                    Current Month
+                  </button>
+                </div>
+              </div>
+
+              {/* Right Column: Date Range Adder & Selected List */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {/* Date Range Tool */}
+                <div style={{ background: '#0a1628', border: '1px solid #1e293b', borderRadius: '10px', padding: '12px' }}>
+                  <div style={{ fontSize: '11.5px', fontWeight: 800, color: '#c4b5fd', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <span>⚡ Add Date Range</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '8px' }}>
+                    <div style={{ flex: '1 1 120px' }}>
+                      <span style={{ fontSize: '10.5px', color: '#94a3b8', display: 'block', marginBottom: '3px' }}>From:</span>
+                      <input
+                        type="date"
+                        value={rangeStart}
+                        onChange={e => setRangeStart(e.target.value)}
+                        style={{ width: '100%', background: '#040c18', border: '1px solid #334155', borderRadius: '6px', color: '#f8fafc', padding: '4px 8px', fontSize: '12px' }}
+                      />
+                    </div>
+                    <div style={{ flex: '1 1 120px' }}>
+                      <span style={{ fontSize: '10.5px', color: '#94a3b8', display: 'block', marginBottom: '3px' }}>To:</span>
+                      <input
+                        type="date"
+                        value={rangeEnd}
+                        onChange={e => setRangeEnd(e.target.value)}
+                        style={{ width: '100%', background: '#040c18', border: '1px solid #334155', borderRadius: '6px', color: '#f8fafc', padding: '4px 8px', fontSize: '12px' }}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="scooh-btn ghost"
+                      disabled={!rangeStart || !rangeEnd}
+                      onClick={() => addDateRange(rangeStart, rangeEnd)}
+                      style={{ fontSize: '11px', padding: '3px 9px', minHeight: '26px', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.4)' }}
+                    >
+                      + Add All Days in Range
+                    </button>
+                    <button
+                      type="button"
+                      className="scooh-btn ghost"
+                      disabled={!rangeStart || !rangeEnd}
+                      onClick={() => {
+                        if (rangeStart) addDate(rangeStart);
+                        if (rangeEnd) addDate(rangeEnd);
+                      }}
+                      style={{ fontSize: '11px', padding: '3px 9px', minHeight: '26px', color: '#cbd5e1' }}
+                    >
+                      + Add Start & End Only
+                    </button>
+                  </div>
+                </div>
+
+                {/* Selected Dates List */}
+                <div style={{ background: '#0a1628', border: '1px solid #1e293b', borderRadius: '10px', padding: '12px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: 800, color: '#f8fafc' }}>
+                      Selected Dates ({selectedDates.length}):
+                    </span>
+                    {selectedDates.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearAllDates}
+                        style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '11px', fontWeight: 700, padding: 0 }}
+                      >
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+
+                  <div style={{ flex: 1, maxHeight: '180px', overflowY: 'auto', display: 'flex', flexWrap: 'wrap', gap: '5px', alignContent: 'flex-start', padding: '2px' }}>
+                    {selectedDates.length === 0 ? (
+                      <div style={{ color: '#64748b', fontSize: '12px', fontStyle: 'italic', padding: '10px 0' }}>
+                        No dates selected yet. Click dates on the calendar or click any quick preset above.
+                      </div>
+                    ) : (
+                      selectedDates.map(d => (
+                        <span
+                          key={d}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            background: 'rgba(14, 165, 233, 0.16)',
+                            border: '1px solid rgba(56, 189, 248, 0.4)',
+                            borderRadius: '5px',
+                            padding: '3px 8px',
+                            fontSize: '11.5px',
+                            color: '#e0f2fe',
+                            fontWeight: 700
+                          }}
+                        >
+                          {fmtDate(d) || d}
+                          <button
+                            type="button"
+                            onClick={() => removeDate(d)}
+                            style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '11px', padding: '0 1px', lineHeight: 1 }}
+                            title={`Remove ${fmtDate(d) || d}`}
+                          >
+                            ✕
+                          </button>
+                        </span>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '12px', borderTop: '1px solid #1e293b' }}>
+              <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                {selectedDates.length === 0
+                  ? 'No dates active (sites show current availability)'
+                  : `Evaluating availability against ${selectedDates.length} date${selectedDates.length === 1 ? '' : 's'}`}
+              </span>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                {selectedDates.length > 0 && (
+                  <button
+                    type="button"
+                    className="scooh-btn ghost"
+                    onClick={clearAllDates}
+                    style={{ minHeight: '36px', padding: '0 14px', fontSize: '12px', color: '#f87171', borderColor: 'rgba(248, 113, 113, 0.35)' }}
+                  >
+                    Clear All
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="scooh-btn primary"
+                  onClick={() => setShowDateModal(false)}
+                  style={{
+                    minHeight: '36px',
+                    padding: '0 20px',
+                    fontSize: '12.5px',
+                    background: 'linear-gradient(135deg, #0284c7, #6366f1)',
+                    border: 'none',
+                    fontWeight: 800,
+                    boxShadow: '0 4px 14px rgba(2, 132, 199, 0.35)'
+                  }}
+                >
+                  ✓ Apply & Evaluate {selectedDates.length > 0 ? `(${selectedDates.length} Dates)` : ''}
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -10290,11 +10917,12 @@ async function exportElectricityExcel(rowsData, filename = 'MediaBuzz_Electricit
     { key: 'bill_type', width: 18 },
     { key: 'billing_month', width: 16 },
     { key: 'due_date', width: 16 },
+    { key: 'payment_date', width: 16 },
     { key: 'units', width: 12 },
     { key: 'rate', width: 12 },
     { key: 'amount', width: 20 },
     { key: 'status', width: 14 },
-    { key: 'paid_date', width: 16 },
+    { key: 'ecs', width: 14 },
     { key: 'payment_reference', width: 22 },
     { key: 'notes', width: 28 }
   ];
@@ -10304,14 +10932,14 @@ async function exportElectricityExcel(rowsData, filename = 'MediaBuzz_Electricit
   attachMediaBuzzExcelHeader(workbook, worksheet, {
     title: 'MEDIA BUZZ — CONSOLIDATED ELECTRICITY BILLS',
     columns: cols,
-    totalColumns: 17
+    totalColumns: 18
   });
 
   // Populate Header Row (Row 2)
   const headers = [
     'SR NO', 'SITE CODE', 'LOCATION', 'SIZE', 'METER NO',
     'SERVICE NUMBER', 'T NUMBER', 'BILL / PROVIDER', 'BILLING MONTH', 'DUE DATE',
-    'UNITS', 'RATE', 'PAYMENT AMOUNT (₹)', 'STATUS', 'PAID DATE',
+    'PAYMENT DATE', 'UNITS', 'RATE', 'PAYMENT AMOUNT (₹)', 'STATUS', 'ECS',
     'PAYMENT REF', 'NOTES'
   ];
   const headerRow = worksheet.getRow(2);
@@ -10332,11 +10960,12 @@ async function exportElectricityExcel(rowsData, filename = 'MediaBuzz_Electricit
       bill_type: r.bill_type || '',
       billing_month: r.billing_month || '',
       due_date: r.due_date ? new Date(r.due_date).toLocaleDateString('en-IN') : '',
+      payment_date: (r.payment_date || r.paid_date) ? new Date(r.payment_date || r.paid_date).toLocaleDateString('en-IN') : '',
       units: r.units || '',
       rate: r.rate || '',
       amount: Number(r.amount || r.payment_amount || 0),
       status: r.payment_status || 'Pending',
-      paid_date: r.paid_date ? new Date(r.paid_date).toLocaleDateString('en-IN') : '',
+      ecs: r.ecs || '',
       payment_reference: r.payment_reference || '',
       notes: r.notes || ''
     });
@@ -10357,7 +10986,7 @@ async function exportElectricityExcel(rowsData, filename = 'MediaBuzz_Electricit
     };
     cell.alignment = {
       vertical: 'middle',
-      horizontal: [1, 4, 8, 9, 10, 11, 12, 14, 15].includes(colNumber) ? 'center' : (colNumber === 13 ? 'right' : 'left'),
+      horizontal: [1, 4, 8, 9, 10, 11, 12, 13, 15, 16].includes(colNumber) ? 'center' : (colNumber === 14 ? 'right' : 'left'),
       wrapText: false
     };
     cell.border = {
@@ -10376,9 +11005,9 @@ async function exportElectricityExcel(rowsData, filename = 'MediaBuzz_Electricit
         cell.font = { name: 'Calibri', size: 10.5 };
         cell.alignment = {
           vertical: 'middle',
-          horizontal: [1, 4, 8, 9, 10, 11, 12, 14, 15].includes(colNumber) ? 'center' : (colNumber === 13 ? 'right' : 'left')
+          horizontal: [1, 4, 8, 9, 10, 11, 12, 13, 15, 16].includes(colNumber) ? 'center' : (colNumber === 14 ? 'right' : 'left')
         };
-        if (colNumber === 13 && typeof cell.value === 'number') {
+        if (colNumber === 14 && typeof cell.value === 'number') {
           cell.numFmt = '#,##,##0';
         }
         cell.border = {
@@ -11335,6 +11964,9 @@ function ElectricityView() {
           meter_no: b.meter_no || matchedSite.meter_no || '',
           service_number: b.service_number || matchedSite.service_number || '',
           t_number: b.t_number || matchedSite.t_number || '',
+          ecs: b.ecs || '',
+          payment_date: b.payment_date || b.paid_date || '',
+          paid_date: b.paid_date || b.payment_date || '',
           amount: Number(b.amount || b.payment_amount || 0),
           payment_amount: Number(b.payment_amount || b.amount || 0)
         };
@@ -11413,6 +12045,8 @@ function ElectricityView() {
             r.bill_type,
             r.billing_month,
             r.payment_status,
+            r.ecs,
+            r.payment_reference,
             r.notes
           ].some(v => String(v || '').toLowerCase().includes(q));
         }
@@ -11435,6 +12069,9 @@ function ElectricityView() {
         if (sortState.key === 'amount') {
           valA = Number(a.amount || a.payment_amount || 0);
           valB = Number(b.amount || b.payment_amount || 0);
+        } else if (sortState.key === 'payment_date') {
+          valA = a.payment_date || a.paid_date || '';
+          valB = b.payment_date || b.paid_date || '';
         }
         return universalCompare(valA, valB, sortState.dir);
       });
@@ -11461,6 +12098,8 @@ function ElectricityView() {
       other_charges: 0,
       amount: '',
       payment_status: 'Pending',
+      ecs: '',
+      payment_date: '',
       paid_date: '',
       payment_reference: '',
       notes: ''
@@ -11510,6 +12149,8 @@ function ElectricityView() {
     const amt = Number(payload.amount || payload.payment_amount || 0);
     payload.amount = amt;
     payload.payment_amount = amt;
+    if (payload.payment_date && !payload.paid_date) payload.paid_date = payload.payment_date;
+    if (payload.paid_date && !payload.payment_date) payload.payment_date = payload.paid_date;
 
     try {
       if (editModal?.id) {
@@ -11541,6 +12182,7 @@ function ElectricityView() {
       await api.put(`/electricity/${payModal.id}`, {
         payment_status: 'Paid',
         paid_date,
+        payment_date: paid_date,
         payment_reference
       });
       setPayModal(null);
@@ -11777,10 +12419,13 @@ function ElectricityView() {
             <option value="site_code:desc">Sort: Site Code (87 → 01)</option>
             <option value="due_date:asc">Sort: Due Date (Earliest First)</option>
             <option value="due_date:desc">Sort: Due Date (Latest First)</option>
+            <option value="payment_date:desc">Sort: Payment Date (Latest First)</option>
+            <option value="payment_date:asc">Sort: Payment Date (Earliest First)</option>
             <option value="amount:desc">Sort: Amount (High to Low)</option>
             <option value="amount:asc">Sort: Amount (Low to High)</option>
             <option value="location:asc">Sort: Location (A–Z)</option>
             <option value="payment_status:asc">Sort: Status (A–Z)</option>
+            <option value="ecs:asc">Sort: ECS (A–Z)</option>
             <option value="billing_month:desc">Sort: Billing Month</option>
           </select>
           {(search || statusFilter !== 'ALL' || providerFilter !== 'ALL' || monthFilter !== 'ALL' || sortState.key !== 'due_date' || sortState.dir !== 'asc') && (
@@ -11878,15 +12523,17 @@ function ElectricityView() {
                 <SortHeader label="BILL / PROVIDER" sortKey="bill_type" currentSort={sortState} onSort={handleSort} style={{ minWidth: '120px' }} />
                 <SortHeader label="BILLING MONTH" sortKey="billing_month" currentSort={sortState} onSort={handleSort} style={{ minWidth: '110px' }} />
                 <SortHeader label="DUE DATE" sortKey="due_date" currentSort={sortState} onSort={handleSort} style={{ minWidth: '110px' }} />
+                <SortHeader label="PAYMENT DATE" sortKey="payment_date" currentSort={sortState} onSort={handleSort} style={{ minWidth: '110px' }} />
                 <SortHeader label="PAYMENT AMOUNT" sortKey="amount" currentSort={sortState} onSort={handleSort} align="right" style={{ minWidth: '120px' }} />
                 <SortHeader label="STATUS" sortKey="payment_status" currentSort={sortState} onSort={handleSort} align="center" style={{ minWidth: '95px' }} />
+                <SortHeader label="ECS" sortKey="ecs" currentSort={sortState} onSort={handleSort} align="center" style={{ minWidth: '85px' }} />
                 <th style={{ minWidth: '140px', textAlign: 'center' }}>ACTIONS</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={canDelete ? "12" : "11"} className="scooh-empty" style={{ padding: '36px 20px' }}>
+                  <td colSpan={canDelete ? "14" : "13"} className="scooh-empty" style={{ padding: '36px 20px' }}>
                     <div style={{ fontSize: '14px', fontWeight: 700, color: '#94a3b8' }}>No electricity bills match your query</div>
                     <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
                       {canAdd ? 'Click "+ Add bill" to record a new electricity bill for any hoarding site.' : 'No recorded electricity bills.'}
@@ -11967,6 +12614,11 @@ function ElectricityView() {
                           </span>
                         )}
                       </td>
+                      <td>
+                        <div style={{ fontSize: '12px', color: (r.payment_date || r.paid_date) ? '#38bdf8' : '#64748b', fontWeight: (r.payment_date || r.paid_date) ? 600 : 400 }}>
+                          {formatDate(r.payment_date || r.paid_date)}
+                        </div>
+                      </td>
                       <td style={{ textAlign: 'right' }}>
                         <b style={{ fontSize: '13px', color: '#f8fafc', letterSpacing: '0.01em' }}>
                           {money(r.amount || r.payment_amount)}
@@ -11976,6 +12628,29 @@ function ElectricityView() {
                         <span className={`scooh-pill ${r.payment_status === 'Paid' ? 'active' : r.payment_status === 'Pending' ? 'watch' : 'vacant'}`}>
                           {r.payment_status || 'Pending'}
                         </span>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        {r.ecs ? (
+                          <span
+                            className="scooh-badgechip"
+                            style={{
+                              background: /^(yes|active|y|done)$/i.test(String(r.ecs).trim()) ? 'rgba(52,211,153,0.18)' :
+                                          (/^(no|inactive|n)$/i.test(String(r.ecs).trim()) ? 'rgba(239,68,68,0.15)' : 'rgba(168,85,247,0.16)'),
+                              color: /^(yes|active|y|done)$/i.test(String(r.ecs).trim()) ? '#34d399' :
+                                     (/^(no|inactive|n)$/i.test(String(r.ecs).trim()) ? '#f87171' : '#c084fc'),
+                              border: /^(yes|active|y|done)$/i.test(String(r.ecs).trim()) ? '1px solid rgba(52,211,153,0.35)' :
+                                      (/^(no|inactive|n)$/i.test(String(r.ecs).trim()) ? '1px solid rgba(239,68,68,0.3)' : '1px solid rgba(168,85,247,0.35)'),
+                              fontWeight: 700,
+                              fontSize: '11px',
+                              padding: '2px 8px',
+                              borderRadius: '6px'
+                            }}
+                          >
+                            {r.ecs}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#64748b', fontSize: '12px' }}>—</span>
+                        )}
                       </td>
                       <td>
                         <div className="scooh-rowactions" style={{ justifyContent: 'center', gap: '6px' }}>
@@ -12253,11 +12928,20 @@ function ElectricityView() {
                     </select>
                   </div>
                   <div className="scooh-field">
-                    <label>Paid Date</label>
+                    <label>ECS (Auto-Debit / Mandate)</label>
+                    <input
+                      name="ecs"
+                      value={editModal.ecs ?? ''}
+                      onChange={e => setEditModal({ ...editModal, ecs: e.target.value })}
+                      placeholder="e.g. Yes / No / Mandate ID"
+                    />
+                  </div>
+                  <div className="scooh-field">
+                    <label>Payment Date</label>
                     <input
                       type="date"
-                      name="paid_date"
-                      defaultValue={editModal.paid_date ? editModal.paid_date.slice(0, 10) : ''}
+                      name="payment_date"
+                      defaultValue={editModal.payment_date ? editModal.payment_date.slice(0, 10) : (editModal.paid_date ? editModal.paid_date.slice(0, 10) : '')}
                     />
                   </div>
 
@@ -12322,7 +13006,7 @@ function ElectricityView() {
                 </div>
 
                 <div className="scooh-field">
-                  <label>Paid Date *</label>
+                  <label>Payment Date *</label>
                   <input
                     type="date"
                     name="paid_date"
