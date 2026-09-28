@@ -2967,6 +2967,7 @@ function PptView() {
   const [sel, setSel] = useState({});
   const [query, setQuery] = useState('');
   const [areaFilter, setAreaFilter] = useState('');
+  const [availFilter, setAvailFilter] = useState('all'); // 'all' | 'available' | 'occupied'
   const [selectedDates, setSelectedDates] = useState([]);
   const [dateInputVal, setDateInputVal] = useState('');
   const [showDateModal, setShowDateModal] = useState(false);
@@ -3474,10 +3475,26 @@ function PptView() {
 
   const selectedCount = useMemo(() => sites.filter(s => sel[s.id || s.site_code]?.checked).length, [sites, sel]);
 
+  const { vacantCount, occupiedCount } = useMemo(() => {
+    let vacant = 0;
+    let occupied = 0;
+    for (const s of sites) {
+      const info = resolveSiteAvailability(s, sel[s.id || s.site_code] || {}, campaignsBySiteCode, campaignMap, selectedDates);
+      if (info.isBooked) occupied++;
+      else vacant++;
+    }
+    return { vacantCount: vacant, occupiedCount: occupied };
+  }, [sites, sel, campaignsBySiteCode, campaignMap, selectedDates]);
+
   const filtered = useMemo(() => {
     const list = sites.filter(s => {
       if (!matchSiteSearch(s, query)) return false;
       if (areaFilter && s.area !== areaFilter) return false;
+      if (availFilter !== 'all') {
+        const info = resolveSiteAvailability(s, sel[s.id || s.site_code] || {}, campaignsBySiteCode, campaignMap, selectedDates);
+        if (availFilter === 'available' && info.isBooked) return false;
+        if (availFilter === 'occupied' && !info.isBooked) return false;
+      }
       return true;
     });
 
@@ -3505,7 +3522,7 @@ function PptView() {
       return 0;
     });
     return list;
-  }, [sites, query, areaFilter, selectedDates, campaignsBySiteCode, sortState, sel]);
+  }, [sites, query, areaFilter, availFilter, selectedDates, campaignsBySiteCode, campaignMap, sortState, sel]);
 
   async function uploadPage(k, file) {
     if (!file) return;
@@ -4573,14 +4590,52 @@ function PptView() {
               </button>
             </div>
 
+            {/* Availability Filter on selected date (Beside Sort) */}
+            <div
+              className={`scooh-ppt-filter-pill ${availFilter !== 'all' ? (availFilter === 'available' ? 'active-green' : 'active-yellow') : ''}`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px'
+              }}
+              title={selectedDates.length > 0 ? `Filter sites available or occupied on selected date (${selectedDates.map(d => fmtDate(d) || d).join(', ')})` : 'Filter sites available or occupied today'}
+            >
+              <span style={{ fontSize: '11px', color: availFilter === 'available' ? '#4ade80' : (availFilter === 'occupied' ? '#fde047' : '#94a3b8'), fontWeight: 700 }}>
+                {availFilter === 'available' ? '🟢' : (availFilter === 'occupied' ? '🟡' : '⚡')} Availability:
+              </span>
+              <select
+                value={availFilter}
+                onChange={e => setAvailFilter(e.target.value)}
+                style={{
+                  fontWeight: 700,
+                  color: availFilter === 'available' ? '#4ade80' : (availFilter === 'occupied' ? '#fde047' : '#cbd5e1')
+                }}
+              >
+                <option value="all">All Sites ({sites.length})</option>
+                <option value="available">🟢 Available Only ({vacantCount})</option>
+                <option value="occupied">🟡 Occupied Only ({occupiedCount})</option>
+              </select>
+              {availFilter !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => setAvailFilter('all')}
+                  style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: '12px', padding: '0 2px', lineHeight: 1 }}
+                  title="Show all sites"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
             {/* Reset Filters */}
-            {(query || areaFilter || selectedDates.length > 0) && (
+            {(query || areaFilter || selectedDates.length > 0 || availFilter !== 'all') && (
               <button
                 type="button"
                 className="scooh-btn ghost"
                 onClick={() => {
                   setQuery('');
                   setAreaFilter('');
+                  setAvailFilter('all');
                   clearAllDates();
                 }}
                 style={{
