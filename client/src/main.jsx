@@ -462,6 +462,54 @@ function parseDay(d) {
   return isNaN(fallback.getTime()) ? null : new Date(fallback.getFullYear(), fallback.getMonth(), fallback.getDate());
 }
 
+function fmtDate(iso) {
+  if (!iso) return '';
+  try {
+    const d = parseDay(iso) || new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch { return iso; }
+}
+
+function extractDateFromString(str) {
+  if (!str) return null;
+  if (str instanceof Date) return isNaN(str.getTime()) ? null : new Date(str.getFullYear(), str.getMonth(), str.getDate());
+  if (typeof str === 'number') {
+    const dt = new Date((str - 25569) * 86400000);
+    return isNaN(dt.getTime()) ? null : new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+  }
+  const s = String(str).trim();
+  if (!s) return null;
+  // 1. DD.MM.YYYY, DD/MM/YYYY, DD-MM-YYYY
+  const dmy = s.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+  if (dmy) {
+    let day = parseInt(dmy[1], 10);
+    let month = parseInt(dmy[2], 10) - 1;
+    let year = parseInt(dmy[3], 10);
+    if (year < 100) year += 2000;
+    if (month > 11 && day <= 12) {
+      const tmp = day - 1;
+      day = month + 1;
+      month = tmp;
+    }
+    const d = new Date(year, month, day);
+    if (!isNaN(d.getTime())) return d;
+  }
+  // 2. YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD
+  const iso = s.match(/(\d{4})[./-](\d{1,2})[./-](\d{1,2})/);
+  if (iso) {
+    const d = new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10));
+    if (!isNaN(d.getTime())) return d;
+  }
+  // 3. DD Mon YYYY e.g. 25 Oct 2026, 25-Oct-2026
+  const monMatch = s.match(/(\d{1,2})[ -]([A-Za-z]{3,9})[ -](\d{2,4})/);
+  if (monMatch) {
+    const d = new Date(`${monMatch[1]} ${monMatch[2]} ${monMatch[3]}`);
+    if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+  return null;
+}
+
 /**
  * Returns the active campaign running on the given date (or today if empty), or null if vacant.
  * A site booked until Sept 20 → selecting Sept 21 returns null (Available / Vacant).
@@ -1323,20 +1371,34 @@ async function makePpt(sites, pages = {}, fileName = `${getTodayPptDateStr()}.pp
     ], { x: 8.12, y: row4Y - 0.02, w: 4.80, h: 0.44, valign: 'middle', margin: 0 });
     s.addShape(pptx.ShapeType.line, { x: 8.12, y: row4Y + 0.46, w: 4.80, h: 0, line: { color: '333333', width: 0.8 } });
 
-    // Row 5: Availability (In PPT only single date should come)
+    // Row 5: Availability (In only PPT: 'Available from <date>' not 'Booked till <date>')
     const row5Y = 5.60;
     let availText = 'Available';
+    const rawVal = String(site._availability || site.ppt_availability || site.availability || '').trim();
+    const dateObj = extractDateFromString(rawVal) || (site._endDate ? (parseDay(site._endDate) || new Date(site._endDate)) : null);
+    const dateFmt = dateObj ? fmtDate(dateObj) : (site._endDate || '');
+
     if (site._isBooked) {
-      const singleDate = site._endDate || (extractDateFromString(site._availability || site.ppt_availability || site.availability) ? fmtDate(extractDateFromString(site._availability || site.ppt_availability || site.availability)) : '');
-      availText = singleDate ? `Booked till ${singleDate}` : 'Occupied';
-    } else if (site._availability && String(site._availability).toLowerCase() !== 'available') {
-      const isOcc = String(site._availability).toLowerCase().startsWith('booked') || String(site._availability).toLowerCase().startsWith('occupied');
+      availText = dateFmt ? `Available from ${dateFmt}` : 'Available';
+    } else if (rawVal && rawVal.toLowerCase() !== 'available') {
+      const isOcc = rawVal.toLowerCase().startsWith('booked') || rawVal.toLowerCase().startsWith('occupied');
       if (isOcc) {
-        const singleDate = site._endDate || (extractDateFromString(site._availability) ? fmtDate(extractDateFromString(site._availability)) : '');
-        availText = singleDate ? `Booked till ${singleDate}` : 'Occupied';
+        availText = dateFmt ? `Available from ${dateFmt}` : 'Available';
+      } else if (rawVal.toLowerCase().startsWith('available from')) {
+        availText = rawVal;
       } else {
-        availText = 'Available';
+        availText = rawVal;
       }
+    } else {
+      availText = 'Available';
+    }
+
+    // Safety checks: Guarantee "Booked till" or "Occupied till" NEVER leaks into PPT slides
+    if (/^(?:booked|occupied)\s+(?:till\s+)?/i.test(availText)) {
+      availText = availText.replace(/^(?:booked|occupied)\s+(?:till\s+)?/i, 'Available from ');
+    }
+    if (/^(?:occupied|booked)$/i.test(availText)) {
+      availText = dateFmt ? `Available from ${dateFmt}` : 'Available';
     }
     if (iconAvailPng) s.addImage({ data: iconAvailPng, x: 7.45, y: row5Y, w: 0.42, h: 0.42 });
     s.addText([
@@ -3971,6 +4033,20 @@ function PptView() {
         const sqft = (Number(w || 0) && Number(h || 0)) ? Number(w) * Number(h) : (x.sq_ft || '');
         const coords = x.gps || ([x.latitude, x.longitude].filter(Boolean).join(', ')) || '';
 
+        // In PPT / PPT export: availability must display as 'Available from <date>' not 'Booked till <date>'
+        const rawDate = info.endDateStr || info.manualDateFmt || '';
+        let pptAvail = 'Available';
+        if (info.isBooked) {
+          pptAvail = rawDate ? `Available from ${rawDate}` : 'Available';
+        } else if (info.availText && !info.availText.toLowerCase().startsWith('available')) {
+          const occClean = String(info.availText).replace(/^(?:booked|occupied)\s+(?:till\s+)?/i, 'Available from ');
+          pptAvail = (occClean.toLowerCase() === 'booked' || occClean.toLowerCase() === 'occupied')
+            ? (rawDate ? `Available from ${rawDate}` : 'Available')
+            : occClean;
+        } else {
+          pptAvail = info.availText || 'Available';
+        }
+
         return {
           'SR NO': idx + 1,
           'MB CODE': x.site_code || '',
@@ -3982,7 +4058,7 @@ function PptView() {
           'W': w || '',
           'H': h || '',
           'SQ FT': sqft,
-          'AVAILABLITY': info.availText,
+          'AVAILABLITY': pptAvail,
           'Campaign Name': info.campaignName,
           'Client Name': info.clientName,
           'Duration': info.durationStr,
@@ -4006,9 +4082,23 @@ function PptView() {
         const v = sel[s.id || s.site_code] || {};
         const info = resolveSiteAvailability(s, v, campaignsBySiteCode, campaignMap, selectedDates);
 
+        // In PPT: availability should display as 'Available from <date>' not 'Booked till <date>'
+        const rawDate = info.endDateStr || info.manualDateFmt || '';
+        let pptAvail = 'Available';
+        if (info.isBooked) {
+          pptAvail = rawDate ? `Available from ${rawDate}` : 'Available';
+        } else if (info.availText && !info.availText.toLowerCase().startsWith('available')) {
+          const occClean = String(info.availText).replace(/^(?:booked|occupied)\s+(?:till\s+)?/i, 'Available from ');
+          pptAvail = (occClean.toLowerCase() === 'booked' || occClean.toLowerCase() === 'occupied')
+            ? (rawDate ? `Available from ${rawDate}` : 'Available')
+            : occClean;
+        } else {
+          pptAvail = info.availText || 'Available';
+        }
+
         return {
           ...s,
-          _availability: info.availText,
+          _availability: pptAvail,
           _rate: v.rate ?? s.ppt_rate ?? s.monthly_rate,
           _showRate: !!v.showRate,
           _endDate: info.endDateStr,
