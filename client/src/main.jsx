@@ -6563,7 +6563,7 @@ function ProposalsView() {
                   <div><span>Discount ({discountPercent}%)</span><strong style={{ color: '#e55d5d' }}>− {money(discountAmount)}</strong></div>
                 )}
                 <div><span>GST ({taxPercent}%)</span><strong>{money(taxAmount)}</strong></div>
-                <div className="scooh-proposal-grand"><span>Total proposal value</span><strong>{money(grandTotal)}</strong></div>
+                <div className="scooh-proposal-grand" style={{ color: '#000' }}><span style={{ color: '#000' }}>Total proposal value</span><strong style={{ color: '#000' }}>{money(grandTotal)}</strong></div>
               </div>
             </section>
 
