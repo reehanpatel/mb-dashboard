@@ -1323,9 +1323,21 @@ async function makePpt(sites, pages = {}, fileName = `${getTodayPptDateStr()}.pp
     ], { x: 8.12, y: row4Y - 0.02, w: 4.80, h: 0.44, valign: 'middle', margin: 0 });
     s.addShape(pptx.ShapeType.line, { x: 8.12, y: row4Y + 0.46, w: 4.80, h: 0, line: { color: '333333', width: 0.8 } });
 
-    // Row 5: Availability
+    // Row 5: Availability (In PPT only single date should come)
     const row5Y = 5.60;
-    const availText = String(site._availability || site.ppt_availability || site.availability || 'Available').trim();
+    let availText = 'Available';
+    if (site._isBooked) {
+      const singleDate = site._endDate || (extractDateFromString(site._availability || site.ppt_availability || site.availability) ? fmtDate(extractDateFromString(site._availability || site.ppt_availability || site.availability)) : '');
+      availText = singleDate ? `Booked till ${singleDate}` : 'Occupied';
+    } else if (site._availability && String(site._availability).toLowerCase() !== 'available') {
+      const isOcc = String(site._availability).toLowerCase().startsWith('booked') || String(site._availability).toLowerCase().startsWith('occupied');
+      if (isOcc) {
+        const singleDate = site._endDate || (extractDateFromString(site._availability) ? fmtDate(extractDateFromString(site._availability)) : '');
+        availText = singleDate ? `Booked till ${singleDate}` : 'Occupied';
+      } else {
+        availText = 'Available';
+      }
+    }
     if (iconAvailPng) s.addImage({ data: iconAvailPng, x: 7.45, y: row5Y, w: 0.42, h: 0.42 });
     s.addText([
       { text: 'Availability:  ', options: { color: 'FFC200', bold: true, fontSize: 14.5, fontFace: 'Arial' } },
@@ -3222,7 +3234,7 @@ function PptView() {
       const singleDate = dateArray[0];
       const singleFmt = fmtDate(singleDate) || singleDate;
       if (isBooked) {
-        defaultAvailText = effectiveEndDate ? `Booked till ${effectiveEndDate}` : 'Occupied';
+        defaultAvailText = effectiveEndDate ? `Booked till ${effectiveEndDate}` : `Booked till ${singleFmt}`;
         availBadge = `🔒 Occupied on ${singleFmt}`;
       } else {
         defaultAvailText = 'Available';
@@ -3232,13 +3244,14 @@ function PptView() {
       if (!isBooked) {
         defaultAvailText = 'Available';
         availBadge = `✓ Available on all ${dateArray.length} dates`;
-      } else if (occupiedDates.length === dateArray.length) {
-        defaultAvailText = effectiveEndDate ? `Booked till ${effectiveEndDate}` : `Occupied on all ${dateArray.length} dates`;
-        availBadge = `🔒 Occupied on all ${dateArray.length} dates`;
       } else {
+        // In PPT only single date should come (Booked till <Single Date> or Available)
+        const singleEnd = effectiveEndDate || (occupiedDates.length > 0 ? fmtDate(occupiedDates[occupiedDates.length - 1]) : '') || (dateArray[0] ? fmtDate(dateArray[0]) : '');
+        defaultAvailText = singleEnd ? `Booked till ${singleEnd}` : 'Occupied';
         const occFmt = occupiedDates.map(d => fmtDate(d) || d).join(', ');
-        defaultAvailText = `Booked on ${occFmt}`;
-        availBadge = `🔒 Occupied on ${occupiedDates.length}/${dateArray.length} dates (${occFmt})`;
+        availBadge = occupiedDates.length === dateArray.length
+          ? `🔒 Occupied on all ${dateArray.length} dates`
+          : `🔒 Occupied on ${occupiedDates.length}/${dateArray.length} dates (${occFmt})`;
       }
     }
 
