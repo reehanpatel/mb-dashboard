@@ -3264,12 +3264,12 @@ function PptView() {
     for (const dStr of dateArray) {
       const camp = getActiveCampaignOnDate(campaignsBySiteCode, siteCode, dStr);
       let isOccOnD = false;
-      if (isPlainAvailable && !hasAuto) {
-        isOccOnD = false;
-      } else if (hasUserManualOverride) {
+      if (hasUserManualOverride) {
         if (manualDateObj) {
           const fDay = parseDay(dStr);
           isOccOnD = !!(fDay && fDay <= manualDateObj);
+        } else if (isPlainAvailable) {
+          isOccOnD = false;
         } else {
           const checkText = String(manualTextInput).toLowerCase();
           isOccOnD = checkText.startsWith('booked') || checkText.startsWith('occupied');
@@ -3281,6 +3281,8 @@ function PptView() {
         } else if (manualDateObj) {
           const fDay = parseDay(dStr);
           isOccOnD = !!(fDay && fDay <= manualDateObj);
+        } else if (isPlainAvailable) {
+          isOccOnD = false;
         } else {
           isOccOnD = false;
         }
