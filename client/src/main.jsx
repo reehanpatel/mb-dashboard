@@ -1373,7 +1373,7 @@ async function makePpt(sites, pages = {}, fileName = `${getTodayPptDateStr()}.pp
 
     // Row 5: Availability
     // Requirement:
-    // - Booked sites must come as: 'Available from <date>'
+    // - Booked sites must come as: 'Booked till <date>' (not 'Available from <date>')
     // - Available sites must come as: 'Available' only
     const row5Y = 5.60;
     let availText = 'Available';
@@ -1386,17 +1386,17 @@ async function makePpt(sites, pages = {}, fileName = `${getTodayPptDateStr()}.pp
       : (Boolean(site._endDate) || /^(?:booked|occupied)/i.test(rawVal) || (/available\s+from/i.test(rawVal) && Boolean(dateFmt)));
 
     if (isBooked) {
-      availText = dateFmt ? `Available from ${dateFmt}` : (site._availability || 'Available');
+      availText = dateFmt ? `Booked till ${dateFmt}` : (site._availability || 'Occupied');
     } else {
       availText = 'Available';
     }
 
-    // Safety checks: Guarantee "Booked till" or "Occupied till" NEVER leaks into PPT slides
-    if (/^(?:booked|occupied)\s+(?:till\s+)?/i.test(availText)) {
-      availText = dateFmt ? `Available from ${dateFmt}` : 'Available';
+    // Safety checks: Guarantee "Available from" is converted to "Booked till", and clean formatting
+    if (/^available\s+from\s+/i.test(availText)) {
+      availText = availText.replace(/^available\s+from\s+/i, 'Booked till ');
     }
-    if (/^(?:occupied|booked)$/i.test(availText)) {
-      availText = dateFmt ? `Available from ${dateFmt}` : 'Available';
+    if (/^(?:occupied|booked)$/i.test(availText) && dateFmt) {
+      availText = `Booked till ${dateFmt}`;
     }
     if (iconAvailPng) s.addImage({ data: iconAvailPng, x: 7.45, y: row5Y, w: 0.42, h: 0.42 });
     s.addText([
@@ -4066,12 +4066,12 @@ function PptView() {
         const coords = x.gps || ([x.latitude, x.longitude].filter(Boolean).join(', ')) || '';
 
         // In PPT / PPT export:
-        // Booked sites display as 'Available from <date>'
-        // Available sites display as 'Available' ONLY (not 'Available from <date>')
+        // Booked sites display as 'Booked till <date>'
+        // Available sites display as 'Available' ONLY
         const rawDate = info.endDateStr || info.manualDateFmt || (extractDateFromString(info.availText) ? fmtDate(extractDateFromString(info.availText)) : '');
         let pptAvail = 'Available';
         if (info.isBooked) {
-          pptAvail = rawDate ? `Available from ${rawDate}` : 'Available';
+          pptAvail = rawDate ? `Booked till ${rawDate}` : 'Occupied';
         } else {
           pptAvail = 'Available';
         }
@@ -4112,12 +4112,12 @@ function PptView() {
         const info = resolveSiteAvailability(s, v, campaignsBySiteCode, campaignMap, selectedDates);
 
         // In PPT:
-        // Booked sites display as 'Available from <date>'
-        // Available sites display as 'Available' ONLY (not 'Available from <date>')
+        // Booked sites display as 'Booked till <date>'
+        // Available sites display as 'Available' ONLY
         const rawDate = info.endDateStr || info.manualDateFmt || (extractDateFromString(info.availText) ? fmtDate(extractDateFromString(info.availText)) : '');
         let pptAvail = 'Available';
         if (info.isBooked) {
-          pptAvail = rawDate ? `Available from ${rawDate}` : 'Available';
+          pptAvail = rawDate ? `Booked till ${rawDate}` : 'Occupied';
         } else {
           pptAvail = 'Available';
         }
@@ -5051,22 +5051,22 @@ function PptView() {
                     </button>
                   ) : info.manualDateFmt ? (
                     <span
-                      title={`Manual Available Date: ${info.manualDateFmt}`}
+                      title={isBooked ? `Booked till: ${info.manualDateFmt}` : 'Available'}
                       style={{
                         fontSize: '11px',
                         fontWeight: 700,
                         padding: '3px 8px',
                         borderRadius: '5px',
-                        background: 'rgba(56, 189, 248, 0.15)',
-                        color: '#38bdf8',
-                        border: '1px solid rgba(56, 189, 248, 0.35)',
+                        background: isBooked ? 'rgba(245, 158, 11, 0.2)' : 'rgba(56, 189, 248, 0.15)',
+                        color: isBooked ? '#fbbf24' : '#38bdf8',
+                        border: isBooked ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid rgba(56, 189, 248, 0.35)',
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '4px',
                         whiteSpace: 'nowrap'
                       }}
                     >
-                      <span>📅 Available: {info.manualDateFmt}</span>
+                      <span>📅 {isBooked ? `Booked till ${info.manualDateFmt}` : 'Available'}</span>
                     </span>
                   ) : isBooked ? (
                     <span
