@@ -1372,40 +1372,31 @@ async function makePpt(sites, pages = {}, fileName = `${getTodayPptDateStr()}.pp
     s.addShape(pptx.ShapeType.line, { x: 8.12, y: row4Y + 0.46, w: 4.80, h: 0, line: { color: '333333', width: 0.8 } });
 
     // Row 5: Availability
-    // Requirement: In PPT, sites which are available must come as 'Available' only (NOT 'Available from <date>')
-    // Only booked sites display as 'Available from <date>' (not 'Booked till <date>')
+    // Requirement:
+    // - Booked sites must come as: 'Available from <date>'
+    // - Available sites must come as: 'Available' only
     const row5Y = 5.60;
     let availText = 'Available';
     const rawVal = String(site._availability || site.ppt_availability || site.availability || '').trim();
     const dateObj = extractDateFromString(rawVal) || (site._endDate ? (parseDay(site._endDate) || new Date(site._endDate)) : null);
     const dateFmt = dateObj ? fmtDate(dateObj) : (site._endDate || '');
 
-    const isAvailKeyword = !rawVal ||
-      /^available\b/i.test(rawVal) ||
-      /^vacant\b/i.test(rawVal) ||
-      /^immediate\b/i.test(rawVal) ||
-      /^ready\b/i.test(rawVal) ||
-      /^yes\b/i.test(rawVal);
+    const isBooked = site._isBooked !== undefined
+      ? Boolean(site._isBooked)
+      : (Boolean(site._endDate) || /^(?:booked|occupied)/i.test(rawVal) || (/available\s+from/i.test(rawVal) && Boolean(dateFmt)));
 
-    if (site._isBooked && !isAvailKeyword) {
-      availText = dateFmt ? `Available from ${dateFmt}` : 'Available';
+    if (isBooked) {
+      availText = dateFmt ? `Available from ${dateFmt}` : (site._availability || 'Available');
     } else {
-      // Sites which are available must come as 'Available' only
       availText = 'Available';
     }
 
-    // Safety checks: Guarantee "Booked till" or "Occupied till" NEVER leaks into PPT slides,
-    // and available sites never get "Available from"
-    if (/^(?:available\s+from\b|available)/i.test(availText)) {
-      if (!site._isBooked || isAvailKeyword) {
-        availText = 'Available';
-      }
-    }
+    // Safety checks: Guarantee "Booked till" or "Occupied till" NEVER leaks into PPT slides
     if (/^(?:booked|occupied)\s+(?:till\s+)?/i.test(availText)) {
-      availText = (site._isBooked && !isAvailKeyword && dateFmt) ? `Available from ${dateFmt}` : 'Available';
+      availText = dateFmt ? `Available from ${dateFmt}` : 'Available';
     }
     if (/^(?:occupied|booked)$/i.test(availText)) {
-      availText = (site._isBooked && !isAvailKeyword && dateFmt) ? `Available from ${dateFmt}` : 'Available';
+      availText = dateFmt ? `Available from ${dateFmt}` : 'Available';
     }
     if (iconAvailPng) s.addImage({ data: iconAvailPng, x: 7.45, y: row5Y, w: 0.42, h: 0.42 });
     s.addText([
@@ -3159,19 +3150,19 @@ function PptView() {
     const manualTextInput = v.availability;
 
     const rawCheckText = String(manualTextInput !== undefined ? manualTextInput : siteStoredAvail).trim().toLowerCase();
-    const isExplicitAvailable = !rawCheckText ||
+    const isPlainAvailable =
       rawCheckText === 'available' ||
-      rawCheckText.startsWith('available') ||
-      rawCheckText.startsWith('vacant') ||
-      rawCheckText.startsWith('ready') ||
-      rawCheckText.startsWith('immediate') ||
+      rawCheckText === 'available only' ||
+      rawCheckText === 'vacant' ||
+      rawCheckText === 'ready' ||
+      rawCheckText === 'immediate' ||
       rawCheckText === 'yes' ||
       rawCheckText === 'y';
 
     let manualDateObj = null;
     if (manualDateInput) {
       manualDateObj = parseDay(manualDateInput);
-    } else if (!isExplicitAvailable) {
+    } else if (!isPlainAvailable) {
       if (manualTextInput !== undefined && manualTextInput !== '') {
         manualDateObj = extractDateFromString(manualTextInput);
       } else if (siteStoredAvail) {
@@ -3203,13 +3194,13 @@ function PptView() {
       const effectiveEndDate = hasAuto ? (activeCamp.end_date ? fmtDate(activeCamp.end_date) : '') : (manualDateFmt || (hasUserManualOverride ? '' : (latestCamp?.end_date ? fmtDate(latestCamp.end_date) : '')));
       const effectiveEndDay = hasAuto ? (activeCamp.end_date ? parseDay(activeCamp.end_date) : null) : manualDateObj;
 
-      if (isExplicitAvailable && !hasAuto) {
-        isBooked = false;
-      } else if (hasAuto) {
-        isBooked = !isExplicitAvailable;
+      if (hasAuto) {
+        isBooked = true;
       } else if (effectiveEndDay) {
         const today = parseDay(new Date());
         isBooked = !today || today <= effectiveEndDay;
+      } else if (isPlainAvailable) {
+        isBooked = false;
       } else {
         const checkText = rawCheckText;
         isBooked = checkText.startsWith('booked') || checkText.startsWith('occupied') || String(s?.availability || '').toLowerCase() === 'booked';
@@ -3229,10 +3220,11 @@ function PptView() {
       let autoCampName = autoCamp?.display || autoCamp?.campaign_name || autoCamp?.brand || autoCamp?.parent_campaign || '';
       let autoClientName = autoCamp?.client || autoCamp?.client_name || '';
 
-      const currentAvailText = isExplicitAvailable ? 'Available' : (manualTextInput !== undefined ? manualTextInput : defaultAvailText);
-      const finalBooked = !isExplicitAvailable && (isBooked ||
+      const currentAvailText = isPlainAvailable && !hasAuto ? 'Available' : (manualTextInput !== undefined ? manualTextInput : defaultAvailText);
+      const finalBooked = isBooked ||
         String(currentAvailText).toLowerCase().startsWith('booked') ||
-        String(currentAvailText).toLowerCase().startsWith('occupied'));
+        String(currentAvailText).toLowerCase().startsWith('occupied') ||
+        (String(currentAvailText).toLowerCase().startsWith('available from') && !!extractDateFromString(currentAvailText));
 
       let manualDurationStr = '';
       if (!hasAuto && manualDateObj) {
@@ -3272,21 +3264,21 @@ function PptView() {
     for (const dStr of dateArray) {
       const camp = getActiveCampaignOnDate(campaignsBySiteCode, siteCode, dStr);
       let isOccOnD = false;
-      if (isExplicitAvailable && !hasAuto) {
+      if (isPlainAvailable && !hasAuto) {
         isOccOnD = false;
       } else if (hasUserManualOverride) {
-        if (manualDateObj && !isExplicitAvailable) {
+        if (manualDateObj) {
           const fDay = parseDay(dStr);
           isOccOnD = !!(fDay && fDay <= manualDateObj);
         } else {
           const checkText = String(manualTextInput).toLowerCase();
-          isOccOnD = !isExplicitAvailable && (checkText.startsWith('booked') || checkText.startsWith('occupied'));
+          isOccOnD = checkText.startsWith('booked') || checkText.startsWith('occupied');
         }
       } else {
         if (camp) {
           isOccOnD = true;
           if (!firstActiveCamp) firstActiveCamp = camp;
-        } else if (manualDateObj && !isExplicitAvailable) {
+        } else if (manualDateObj) {
           const fDay = parseDay(dStr);
           isOccOnD = !!(fDay && fDay <= manualDateObj);
         } else {
@@ -4074,18 +4066,11 @@ function PptView() {
         const coords = x.gps || ([x.latitude, x.longitude].filter(Boolean).join(', ')) || '';
 
         // In PPT / PPT export:
-        // Available sites must display as 'Available' ONLY (not 'Available from <date>')
         // Booked sites display as 'Available from <date>'
-        const rawDate = info.endDateStr || info.manualDateFmt || '';
+        // Available sites display as 'Available' ONLY (not 'Available from <date>')
+        const rawDate = info.endDateStr || info.manualDateFmt || (extractDateFromString(info.availText) ? fmtDate(extractDateFromString(info.availText)) : '');
         let pptAvail = 'Available';
-        const isAvailKeyword = !info.availText ||
-          /^available\b/i.test(info.availText) ||
-          /^vacant\b/i.test(info.availText) ||
-          /^immediate\b/i.test(info.availText) ||
-          /^ready\b/i.test(info.availText) ||
-          /^yes\b/i.test(info.availText);
-
-        if (info.isBooked && !isAvailKeyword) {
+        if (info.isBooked) {
           pptAvail = rawDate ? `Available from ${rawDate}` : 'Available';
         } else {
           pptAvail = 'Available';
@@ -4127,18 +4112,11 @@ function PptView() {
         const info = resolveSiteAvailability(s, v, campaignsBySiteCode, campaignMap, selectedDates);
 
         // In PPT:
-        // Available sites must display as 'Available' ONLY (not 'Available from <date>')
         // Booked sites display as 'Available from <date>'
-        const rawDate = info.endDateStr || info.manualDateFmt || '';
+        // Available sites display as 'Available' ONLY (not 'Available from <date>')
+        const rawDate = info.endDateStr || info.manualDateFmt || (extractDateFromString(info.availText) ? fmtDate(extractDateFromString(info.availText)) : '');
         let pptAvail = 'Available';
-        const isAvailKeyword = !info.availText ||
-          /^available\b/i.test(info.availText) ||
-          /^vacant\b/i.test(info.availText) ||
-          /^immediate\b/i.test(info.availText) ||
-          /^ready\b/i.test(info.availText) ||
-          /^yes\b/i.test(info.availText);
-
-        if (info.isBooked && !isAvailKeyword) {
+        if (info.isBooked) {
           pptAvail = rawDate ? `Available from ${rawDate}` : 'Available';
         } else {
           pptAvail = 'Available';
@@ -4150,7 +4128,7 @@ function PptView() {
           _rate: v.rate ?? s.ppt_rate ?? s.monthly_rate,
           _showRate: !!v.showRate,
           _endDate: info.endDateStr,
-          _isBooked: info.isBooked && !isAvailKeyword,
+          _isBooked: info.isBooked,
           _campaignName: info.campaignName,
           _clientName: info.clientName,
           _startDate: info.startDateStr,
