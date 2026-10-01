@@ -1111,11 +1111,22 @@ async function createSitePhotoShowcase(imgDataUrl, boxW_px = 1500, boxH_px = 122
   // Subtle clean border around the fitted photo
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.16)';
   ctx.lineWidth = 2;
+  ctx.beginPath();
   if (ctx.roundRect) {
-    ctx.beginPath();
     ctx.roundRect(fitX + 1, fitY + 1, fitW - 2, fitH - 2, radius);
-    ctx.stroke();
+  } else {
+    ctx.moveTo(fitX + 1 + radius, fitY + 1);
+    ctx.lineTo(fitX + 1 + fitW - 2 - radius, fitY + 1);
+    ctx.quadraticCurveTo(fitX + 1 + fitW - 2, fitY + 1, fitX + 1 + fitW - 2, fitY + 1 + radius);
+    ctx.lineTo(fitX + 1 + fitW - 2, fitY + 1 + fitH - 2 - radius);
+    ctx.quadraticCurveTo(fitX + 1 + fitW - 2, fitY + 1 + fitH - 2, fitX + 1 + fitW - 2 - radius, fitY + 1 + fitH - 2);
+    ctx.lineTo(fitX + 1 + radius, fitY + 1 + fitH - 2);
+    ctx.quadraticCurveTo(fitX + 1, fitY + 1 + fitH - 2, fitX + 1, fitY + 1 + fitH - 2 - radius);
+    ctx.lineTo(fitX + 1, fitY + 1 + radius);
+    ctx.quadraticCurveTo(fitX + 1, fitY + 1, fitX + 1 + radius, fitY + 1);
+    ctx.closePath();
   }
+  ctx.stroke();
   ctx.restore();
 
   return canvas.toDataURL('image/jpeg', 0.94);
@@ -1129,7 +1140,31 @@ function getTodayPptDateStr() {
   return `${day}-${month}-${year}`;
 }
 
+const isIOS = typeof navigator !== 'undefined' && (
+  /iPad|iPhone|iPod/.test(navigator.userAgent || '') ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+);
+
+function safeDownloadBlob(blob, filename, mimeType = 'application/octet-stream') {
+  const finalBlob = blob instanceof Blob ? blob : new Blob([blob], { type: mimeType });
+  const url = window.URL.createObjectURL(finalBlob);
+  const a = document.createElement('a');
+  a.style.display = 'none';
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  // Safe timeout for iOS Safari / WebKit downloads so the stream is not dropped prematurely
+  setTimeout(() => {
+    try {
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch {}
+  }, 60000);
+}
+
 async function makePpt(sites, pages = {}, fileName = `${getTodayPptDateStr()}.pptx`) {
+
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
   pptx.author = 'Media Buzz Outdoor';
@@ -1456,7 +1491,9 @@ async function makePpt(sites, pages = {}, fileName = `${getTodayPptDateStr()}.pp
 
   let finalFileName = String(fileName || `${getTodayPptDateStr()}.pptx`).trim();
   if (!finalFileName.toLowerCase().endsWith('.pptx')) finalFileName += '.pptx';
-  await pptx.writeFile({ fileName: finalFileName });
+  const pptBlob = await pptx.write({ outputType: 'blob' });
+  safeDownloadBlob(pptBlob, finalFileName, 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+
 
   try {
     const siteCodes = (sites || []).map(s => s.site_code).filter(Boolean);
@@ -1605,13 +1642,9 @@ async function exportStyledExcel(rowsData, filename = `${getTodayPptDateStr()}.x
 
   const buffer = await workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = finalFileName;
-  a.click();
-  URL.revokeObjectURL(url);
+  safeDownloadBlob(blob, finalFileName, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
+
 
 function Login() {
   const nav = useNavigate();
@@ -4148,8 +4181,9 @@ function PptView() {
       await makePpt(chosen, pages, `${cleanName}.pptx`);
 
       if (alsoGenerateExcel) {
-        // Small delay to ensure browser reliably dispatches multiple downloads
-        await new Promise(r => setTimeout(r, 450));
+        // Safe delay to ensure iOS Safari and mobile browsers finish initiating the PPT download
+        await new Promise(r => setTimeout(r, isIOS ? 1200 : 500));
+
 
         const rows = chosen.map((x, idx) => {
           let w = x.width || '', h = x.height || '';
@@ -4746,11 +4780,13 @@ function PptView() {
                 <span>📂 {folderImportStatus && !folderImportStatus.finished ? 'Importing…' : 'Import Photo Folder'}</span>
                 <input
                   type="file"
-                  {...{ webkitdirectory: '', directory: '', multiple: true }}
+                  {...(!isIOS ? { webkitdirectory: '', directory: '' } : { accept: 'image/*' })}
+                  multiple
                   hidden
                   disabled={Boolean(folderImportStatus && !folderImportStatus.finished)}
                   onChange={handleFolderPhotoImport}
                 />
+
               </label>
 
               <label
@@ -4922,9 +4958,11 @@ function PptView() {
                       📁 Folder
                       <input
                         type="file"
-                        {...{ webkitdirectory: '', directory: '', multiple: true }}
+                        {...(!isIOS ? { webkitdirectory: '', directory: '' } : { accept: 'image/*' })}
+                        multiple
                         hidden
                         onChange={e => {
+
                           const imgFiles = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/') || /\.(jpe?g|png|webp|avif|gif|bmp)$/i.test(f.name));
                           if (imgFiles.length) addImages(s, imgFiles, true);
                           else alert('No image files found in folder.');
@@ -5658,7 +5696,7 @@ function PptView() {
             </div>
 
             {/* Main Body: Grid with Calendar and Range/Chip Manager */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(290px, 340px) 1fr', gap: '16px', marginBottom: '16px' }}>
+            <div className="scooh-ppt-date-modal-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(290px, 340px) 1fr', gap: '16px', marginBottom: '16px' }}>
               {/* Left Column: Interactive Month Calendar */}
               <div style={{ background: '#0a1628', border: '1px solid #1e293b', borderRadius: '10px', padding: '14px' }}>
                 {/* Month Navigator */}
