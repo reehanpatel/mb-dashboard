@@ -266,9 +266,9 @@ async function syncSiteAvailability() {
         // Site should be Available (revert only if previously marked occupied)
         if (currentAvail.startsWith('occupied')) {
           await q(`UPDATE sites SET availability='Available', updated_at=NOW() WHERE id=?`, [site.id]);
-        }
       }
     }
+    notifySitesUpdated({ action: 'sync-availability' });
   } catch (err) {
     console.error('[syncSiteAvailability] Error:', err.message);
   }

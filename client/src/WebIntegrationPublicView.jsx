@@ -33,19 +33,30 @@ export default function WebIntegrationPublicView() {
     if (initialMedia) setMediaFilter(initialMedia);
   }, [initialCity, initialMedia]);
 
+  const [dateFilter, setDateFilter] = useState('');
+
   // Fetch sites from public unauthenticated endpoint
-  const fetchSites = async (isBackground = false) => {
+  const fetchSites = async (isBackground = false, targetDate = dateFilter) => {
     if (!isBackground) setLoading(true);
     try {
-      const res = await fetch('/api/public/sites');
+      const queryParam = targetDate ? `?date=${encodeURIComponent(targetDate)}` : '';
+      const res = await fetch(`/api/public/sites${queryParam}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       const rawList = Array.isArray(json?.data) ? json.data : (Array.isArray(json?.sites) ? json.sites : []);
-      const normalized = rawList.map(s => ({
-        ...s,
-        images: Array.isArray(s.images) && s.images.length > 0 ? s.images : (Array.isArray(s.photos) ? s.photos : []),
-        availability: s.availability || s.status || (s.is_available ? 'Available' : 'Booked')
-      }));
+      const normalized = rawList.map(s => {
+        const isAvail = s.is_available !== undefined
+          ? Boolean(s.is_available)
+          : !String(s.availability || s.status || '').toLowerCase().match(/occupied|booked|maintenance/);
+        return {
+          ...s,
+          images: Array.isArray(s.images) && s.images.length > 0 ? s.images : (Array.isArray(s.photos) ? s.photos : []),
+          availability: s.availability || s.status || (isAvail ? 'Available' : 'Booked'),
+          is_available: isAvail,
+          available_from: s.available_from || null,
+          booked_till: s.booked_till || null
+        };
+      });
       setSites(normalized);
       if (json?.company) {
         setCompanySettings(prev => ({ ...prev, ...json.company }));
@@ -234,6 +245,21 @@ export default function WebIntegrationPublicView() {
               <option value="Booked">Booked Only</option>
             </select>
 
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <input
+                type="date"
+                value={dateFilter}
+                onChange={e => {
+                  const val = e.target.value;
+                  setDateFilter(val);
+                  fetchSites(false, val);
+                }}
+                className="mb-select"
+                style={{ minWidth: '135px' }}
+                title="Select date to check hoarding availability for upcoming campaigns"
+              />
+            </div>
+
             <select value={sortKey} onChange={e => setSortKey(e.target.value)} className="mb-select">
               <option value="site_code">Sort: Site Code</option>
               <option value="city">Sort: City</option>
@@ -244,8 +270,11 @@ export default function WebIntegrationPublicView() {
 
         {/* Results summary bar */}
         <div className="mb-results-summary">
-          <span>Showing <strong>{filteredSites.length}</strong> of {sites.length} outdoor advertising sites</span>
-          {(search || cityFilter || mediaFilter || lightingFilter || availFilter) && (
+          <span>
+            Showing <strong>{filteredSites.length}</strong> of {sites.length} outdoor advertising sites
+            {dateFilter && <span style={{ marginLeft: '6px', color: '#38bdf8' }}>(for date: {dateFilter})</span>}
+          </span>
+          {(search || cityFilter || mediaFilter || lightingFilter || availFilter || dateFilter) && (
             <button
               type="button"
               className="mb-reset-filters-btn"
@@ -255,6 +284,8 @@ export default function WebIntegrationPublicView() {
                 setMediaFilter('');
                 setLightingFilter('');
                 setAvailFilter('');
+                setDateFilter('');
+                fetchSites(false, '');
               }}
             >
               Reset Filters
@@ -312,10 +343,30 @@ export default function WebIntegrationPublicView() {
                   {/* Badges on Image */}
                   <div className="mb-card-badge-top">
                     <span className="mb-badge mb-badge-code">{s.site_code}</span>
-                    <span className={`mb-badge ${isAvail ? 'mb-badge-avail' : 'mb-badge-booked'}`}>
-                      {s.availability || 'Available'}
+                    <span className={`mb-badge ${isAvail ? 'mb-badge-avail' : 'mb-badge-booked'}`} title={s.availability}>
+                      {isAvail ? '✓ Available' : (s.availability || 'Booked')}
                     </span>
                   </div>
+
+                  {!isAvail && s.available_from && (
+                    <div style={{
+                      position: 'absolute',
+                      bottom: '10px',
+                      left: '10px',
+                      background: 'rgba(15, 23, 42, 0.88)',
+                      backdropFilter: 'blur(4px)',
+                      color: '#fbbf24',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '3px 8px',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(245, 158, 11, 0.45)',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                      zIndex: 2
+                    }}>
+                      📅 Open from {s.available_from}
+                    </div>
+                  )}
 
                   {hasImages && (
                     <div className="mb-photo-count-badge">
@@ -461,13 +512,18 @@ export default function WebIntegrationPublicView() {
                   <strong>Dimensions:</strong> {inquirySite.size || 'Standard'}
                 </div>
                 <div className="mb-inquiry-spec">
-                  <strong>Status:</strong> {inquirySite.availability || 'Available'}
+                  <strong>Status:</strong> <span style={{ color: inquirySite.is_available ? '#34d399' : '#fbbf24', fontWeight: 700 }}>{inquirySite.availability || (inquirySite.is_available ? 'Available' : 'Booked')}</span>
                 </div>
+                {inquirySite.available_from && (
+                  <div className="mb-inquiry-spec">
+                    <strong>Next Available:</strong> <span style={{ color: '#38bdf8', fontWeight: 700 }}>{inquirySite.available_from}</span>
+                  </div>
+                )}
               </div>
 
               <div className="mb-inquiry-actions">
                 <a
-                  href={`https://wa.me/919825012345?text=${encodeURIComponent(`Hi Media Buzz, I am interested in booking site ${inquirySite.site_code} (${inquirySite.size}) located at ${inquirySite.address || inquirySite.area || inquirySite.city}. Please share pricing and availability dates.`)}`}
+                  href={`https://wa.me/919825012345?text=${encodeURIComponent(`Hi Media Buzz, I am interested in booking site ${inquirySite.site_code} (${inquirySite.size || 'Prime Display'}) located at ${inquirySite.address || inquirySite.area || inquirySite.city}.\n\nCurrent Status: ${inquirySite.availability || (inquirySite.is_available ? 'Available' : 'Booked')}${inquirySite.available_from ? ' (Available from ' + inquirySite.available_from + ')' : ''}.\n\nPlease share rate card, commercial proposal and booking calendar.`)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="mb-btn mb-btn-whatsapp"
@@ -476,7 +532,7 @@ export default function WebIntegrationPublicView() {
                 </a>
 
                 <a
-                  href={`mailto:info@mediabuzz.in?subject=${encodeURIComponent(`Booking Inquiry: Site ${inquirySite.site_code}`)}&body=${encodeURIComponent(`Hello Media Buzz team,\n\nI am interested in advertising on Site Code: ${inquirySite.site_code}.\nLocation: ${[inquirySite.address, inquirySite.area, inquirySite.city].filter(Boolean).join(', ')}\nDimensions: ${inquirySite.size}\n\nPlease get in touch with rate cards and available booking periods.\n\nThank you!`)}`}
+                  href={`mailto:info@mediabuzz.in?subject=${encodeURIComponent(`Booking Inquiry: Site ${inquirySite.site_code} (${inquirySite.availability || 'Available'})`)}&body=${encodeURIComponent(`Hello Media Buzz team,\n\nI am interested in advertising on Site Code: ${inquirySite.site_code}.\nLocation: ${[inquirySite.address, inquirySite.area, inquirySite.city].filter(Boolean).join(', ')}\nDimensions: ${inquirySite.size || 'Standard'}\nCurrent Status: ${inquirySite.availability || (inquirySite.is_available ? 'Available' : 'Booked')}${inquirySite.available_from ? ' (Available from ' + inquirySite.available_from + ')' : ''}\n\nPlease get in touch with rate cards and available booking periods.\n\nThank you!`)}`}
                   className="mb-btn mb-btn-email"
                 >
                   <span>✉️ Email Inquiry</span>

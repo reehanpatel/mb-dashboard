@@ -113,22 +113,58 @@ export function registerPublicRoutes(app) {
         const currentCamp = campaignMapByCode[code]?.current;
         const upcomingCamp = campaignMapByCode[code]?.upcoming;
 
-        const dbAvail = String(s.availability || '').toLowerCase();
-        const isOccupied = Boolean(conflictReason) || dbAvail.startsWith('occupied');
-        const isMaintenance = dbAvail === 'maintenance';
+        const formatFmtDate = (dStr) => {
+          if (!dStr) return '';
+          try {
+            const dt = new Date(dStr);
+            if (isNaN(dt.getTime())) return dStr;
+            return dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+          } catch (_) {
+            return dStr;
+          }
+        };
+
+        const rawAvail = String(flags.ppt_availability || s.availability || '').trim();
+        const rawAvailLower = rawAvail.toLowerCase();
+
+        const isMaintenance = rawAvailLower === 'maintenance';
+        const hasCampaignBooking = Boolean(currentCamp);
+        const hasConflictBooking = Boolean(conflictReason);
+        const hasManualOccupied = !isMaintenance && (rawAvailLower.startsWith('occupied') || rawAvailLower.startsWith('booked'));
+
+        const isOccupied = !isMaintenance && (hasCampaignBooking || hasConflictBooking || hasManualOccupied);
 
         let availableFrom = null;
-        if (isOccupied && currentCamp?.end_date) {
+        let bookedTill = null;
+        let displayAvailability = 'Available';
+
+        if (isMaintenance) {
+          displayAvailability = 'Maintenance';
+        } else if (hasCampaignBooking && currentCamp.end_date) {
+          bookedTill = currentCamp.end_date;
           try {
             const d = new Date(currentCamp.end_date);
             d.setDate(d.getDate() + 1);
             availableFrom = d.toISOString().slice(0, 10);
           } catch (_) {}
+          displayAvailability = `Booked till ${formatFmtDate(currentCamp.end_date)}`;
+        } else if (hasConflictBooking) {
+          if (currentCamp?.end_date) {
+            bookedTill = currentCamp.end_date;
+            displayAvailability = `Booked till ${formatFmtDate(currentCamp.end_date)}`;
+          } else {
+            displayAvailability = conflictReason !== 'Direct' ? `Occupied (${conflictReason})` : 'Occupied';
+          }
+        } else if (hasManualOccupied) {
+          displayAvailability = rawAvail;
+        } else if (rawAvail && rawAvailLower !== 'available') {
+          displayAvailability = rawAvail;
+        } else {
+          displayAvailability = 'Available';
         }
 
-        let status = 'Available';
-        if (isMaintenance) status = 'Maintenance';
-        else if (isOccupied) status = 'Occupied';
+        const status = isMaintenance ? 'Maintenance' : (isOccupied ? 'Occupied' : 'Available');
+        const isAvailable = status === 'Available';
 
         return {
           id: s.id,
@@ -151,9 +187,13 @@ export function registerPublicRoutes(app) {
           primary_photo: primaryPhoto,
           photo_url: primaryPhoto,
           raw_photos: rawImages,
-          is_available: status === 'Available',
+          availability: displayAvailability,
           status,
+          is_available: isAvailable,
           available_from: availableFrom,
+          booked_till: bookedTill,
+          active_client: currentCamp?.client || null,
+          active_brand: currentCamp?.brand || null,
           occupied_reason: conflictReason && conflictReason !== 'Direct' ? `Linked panel (${conflictReason})` : null,
           next_booking_start: upcomingCamp?.start_date || null
         };
