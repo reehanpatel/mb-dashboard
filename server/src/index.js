@@ -23,8 +23,17 @@ const uploadDir=path.resolve(__dirname,'..',process.env.UPLOAD_DIR||'uploads');
 fs.mkdirSync(uploadDir,{recursive:true});
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
-  contentSecurityPolicy: false
+  contentSecurityPolicy: false,
+  frameguard: false
 }));
+app.use(['/embed', '/api/public'], (req, res, next) => {
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
 app.use(cors({origin:true,credentials:true}));
 app.use(express.json({limit:'10mb'}));
 registerPublicRoutes(app);
@@ -506,6 +515,109 @@ app.get('/api/dashboard', auth, async (req, res) => {
 });
 // Dedicated API Endpoints (must be registered BEFORE /api/:entity)
 
+// ==========================================
+// Web Integration & Live Auto-Sync Engine
+// ==========================================
+const sseClients = new Set();
+
+export function notifySitesUpdated(metadata = {}) {
+  const payload = JSON.stringify({
+    type: 'SITES_UPDATED',
+    timestamp: Date.now(),
+    ...metadata
+  });
+  let count = 0;
+  for (const client of sseClients) {
+    try {
+      client.write(`data: ${payload}\n\n`);
+      count++;
+    } catch (e) {
+      sseClients.delete(client);
+    }
+  }
+  return count;
+}
+
+// Public API for external web integration
+app.get('/api/public/sites', async (req, res) => {
+  try {
+    const rows = await q("SELECT * FROM sites WHERE record_status != 'archived' ORDER BY site_code ASC");
+    const formatted = rows.map(r => {
+      let f = {};
+      try { f = typeof r.flags === 'string' ? JSON.parse(r.flags) : (r.flags || {}); } catch {}
+      const images = Array.isArray(f.ppt_images) ? f.ppt_images : [];
+      return {
+        id: r.id,
+        site_code: r.site_code,
+        city: r.city || '',
+        area: r.area || '',
+        address: r.address || '',
+        media_type: r.media_type || 'Billboard',
+        lighting: r.lighting || 'FL',
+        facing: r.facing || '',
+        size: r.size || '',
+        width: r.width,
+        height: r.height,
+        orientation: r.orientation || '',
+        ownership: r.ownership || '',
+        availability: f.ppt_availability || r.availability || 'Available',
+        monthly_rate: f.ppt_rate || r.monthly_rate || 0,
+        latitude: r.latitude,
+        longitude: r.longitude,
+        maps_url: r.maps_url || '',
+        gps: r.gps || '',
+        notes: r.notes || '',
+        images,
+        updated_at: r.updated_at
+      };
+    });
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.json({
+      success: true,
+      count: formatted.length,
+      data: formatted,
+      updated_at: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error('Error fetching public sites:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch sites: ' + err.message });
+  }
+});
+
+// Real-Time Server-Sent Events (SSE) Stream for Integrated Web Pages
+app.get('/api/public/sites/stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (res.flushHeaders) res.flushHeaders();
+
+  res.write(`data: ${JSON.stringify({ type: 'CONNECTED', timestamp: Date.now() })}\n\n`);
+  sseClients.add(res);
+
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(`: heartbeat\n\n`);
+    } catch {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+    }
+  }, 20000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    sseClients.delete(res);
+  });
+});
+
+// Instant update trigger endpoint
+app.post(['/api/public/sites/notify', '/api/sites/notify-update'], (req, res) => {
+  const count = notifySitesUpdated({ source: req.body?.source || 'dashboard' });
+  res.json({ success: true, broadcasted: true, clientCount: count, timestamp: Date.now() });
+});
+
+
 // Site Photos Upload & Delete
 app.post('/api/sites/:id/images', auth, upload.array('files', 100), async (req, res) => {
   try {
@@ -519,6 +631,7 @@ app.post('/api/sites/:id/images', auth, upload.array('files', 100), async (req, 
     const urls = (req.files || []).map(f => `/uploads/${f.filename}`);
     flags.ppt_images = shouldReplace ? urls : [...existing, ...urls];
     await q('UPDATE sites SET flags=?, updated_at=NOW() WHERE id=?', [JSON.stringify(flags), req.params.id]);
+    notifySitesUpdated({ action: 'images', site_id: site.id, site_code: site.site_code });
     res.json({ site_id: site.id, site_code: site.site_code, images: flags.ppt_images, replaced: shouldReplace });
   } catch (err) {
     console.error('Image upload error:', err);
@@ -549,6 +662,7 @@ app.post('/api/sites/code/:site_code/images', auth, upload.array('files', 100), 
     const urls = (req.files || []).map(f => `/uploads/${f.filename}`);
     flags.ppt_images = shouldReplace ? urls : [...existing, ...urls];
     await q('UPDATE sites SET flags=?, updated_at=NOW() WHERE id=?', [JSON.stringify(flags), site.id]);
+    notifySitesUpdated({ action: 'images', site_id: site.id, site_code: site.site_code });
     res.json({ site_id: site.id, site_code: site.site_code, images: flags.ppt_images, replaced: shouldReplace });
   } catch (err) {
     console.error('Image upload by code error:', err);
@@ -569,6 +683,7 @@ app.delete('/api/sites/:id/images/:index', auth, async (req, res) => {
       existing.splice(idx, 1);
       flags.ppt_images = existing;
       await q('UPDATE sites SET flags=?, updated_at=NOW() WHERE id=?', [JSON.stringify(flags), req.params.id]);
+      notifySitesUpdated({ action: 'images', site_id: site.id });
     }
     res.json({ images: flags.ppt_images });
   } catch (err) {
@@ -591,6 +706,7 @@ app.delete('/api/sites/code/:site_code/images/:index', auth, async (req, res) =>
       existing.splice(idx, 1);
       flags.ppt_images = existing;
       await q('UPDATE sites SET flags=?, updated_at=NOW() WHERE id=?', [JSON.stringify(flags), site.id]);
+      notifySitesUpdated({ action: 'images', site_id: site.id, site_code: site.site_code });
     }
     res.json({ images: flags.ppt_images });
   } catch (err) {
@@ -608,6 +724,7 @@ app.delete('/api/sites/:id/images', auth, async (req, res) => {
     if (Array.isArray(flags)) flags = { tags: flags };
     flags.ppt_images = [];
     await q('UPDATE sites SET flags=?, updated_at=NOW() WHERE id=?', [JSON.stringify(flags), req.params.id]);
+    notifySitesUpdated({ action: 'images', site_id: site.id });
     res.json({ site_id: site.id, site_code: site.site_code, images: [] });
   } catch (err) {
     res.status(500).json({ message: 'Delete all images error: ' + err.message });
@@ -625,6 +742,7 @@ app.delete('/api/sites/code/:site_code/images', auth, async (req, res) => {
     if (Array.isArray(flags)) flags = { tags: flags };
     flags.ppt_images = [];
     await q('UPDATE sites SET flags=?, updated_at=NOW() WHERE id=?', [JSON.stringify(flags), site.id]);
+    notifySitesUpdated({ action: 'images', site_id: site.id, site_code: site.site_code });
     res.json({ site_id: site.id, site_code: site.site_code, images: [] });
   } catch (err) {
     res.status(500).json({ message: 'Delete all images error: ' + err.message });
@@ -652,6 +770,7 @@ app.post('/api/sites/sync-photos', auth, async (req, res) => {
         }
       }
     }
+    if (updated > 0) notifySitesUpdated({ action: 'sync-photos', count: updated });
     res.json({ success: true, updated });
   } catch (err) {
     res.status(500).json({ message: 'Sync error: ' + err.message });
@@ -663,6 +782,7 @@ app.post('/api/sites/clear-all-sites', auth, async (req, res) => {
   try {
     await q('DELETE FROM sites');
     await q('ALTER TABLE sites AUTO_INCREMENT = 1').catch(() => {});
+    notifySitesUpdated({ action: 'clear-all-sites' });
     res.json({ success: true, message: 'All sites have been deleted from the database' });
   } catch (err) {
     res.status(500).json({ message: 'Failed to clear sites: ' + err.message });
@@ -696,6 +816,7 @@ app.post('/api/sites/clear-all-images', auth, async (req, res) => {
         }
       }
     }
+    notifySitesUpdated({ action: 'clear-all-images' });
     res.json({ success: true, message: 'All photos removed successfully' });
   } catch (err) {
     res.status(500).json({ message: 'Clear all images error: ' + err.message });
@@ -3756,6 +3877,9 @@ app.post('/api/:entity', auth, notViewer, async (req, res) => {
       }
     }
     const rows = await q(`SELECT * FROM \`${e.table}\` WHERE id=?`, [result.insertId]);
+    if (req.params.entity === 'sites' || req.params.entity === 'campaigns') {
+      notifySitesUpdated({ entity: req.params.entity, action: 'create', id: result.insertId });
+    }
     res.status(201).json(rows[0]);
   } catch (err) {
     console.error('Error creating entity ' + req.params.entity, err.message);
@@ -3830,6 +3954,9 @@ app.put('/api/:entity/:id', auth, notViewer, async (req, res) => {
       }
     }
   }
+  if (req.params.entity === 'sites' || req.params.entity === 'campaigns') {
+    notifySitesUpdated({ entity: req.params.entity, action: 'update', id: req.params.id });
+  }
   res.json(after);
 });
 
@@ -3849,6 +3976,9 @@ app.delete('/api/:entity/:id', auth, managerOrAdmin, async (req, res) => {
   if (req.params.entity === 'campaigns') {
     await deleteLinkedCampaigns(q, req.params.id);
     await syncSiteAvailability();
+  }
+  if (req.params.entity === 'sites' || req.params.entity === 'campaigns') {
+    notifySitesUpdated({ entity: req.params.entity, action: 'delete', id: req.params.id });
   }
   res.json({ success: true });
 });
@@ -3883,6 +4013,9 @@ app.post('/api/:entity/batch-delete', auth, managerOrAdmin, async (req, res) => 
     await batchDeleteLinkedCampaigns(q, cleanIds);
     await syncSiteAvailability();
   }
+  if (req.params.entity === 'sites' || req.params.entity === 'campaigns') {
+    notifySitesUpdated({ entity: req.params.entity, action: 'batch-delete', ids: cleanIds });
+  }
   res.json({ success: true, count: cleanIds.length });
 });
 
@@ -3892,6 +4025,7 @@ app.get('/api/sites/conflicts/:code', auth, (req, res) => {
 });
 app.post('/api/sites/sync-availability', auth, managerOrAdmin, async (req, res) => {
   await syncSiteAvailability();
+  notifySitesUpdated({ action: 'sync-availability' });
   res.json({ success: true, message: 'All site availabilities synchronized.' });
 });
 const distCandidates = [

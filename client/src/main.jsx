@@ -8,6 +8,8 @@ import api from './api';
 import CampaignDetailsView, { CampaignDetailsModal, SiteDetailsModal } from './CampaignDetailsView';
 import { defaultSettings } from './defaultSites';
 import { canonicalSiteCode, isCombinedSite, getSiteTypeTag, getConflictSummary, getOverlappingSiteCodes, SITE_PANELS } from './siteHierarchy';
+import WebIntegrationPublicView from './WebIntegrationPublicView';
+import WebIntegrationSettingsPanel, { broadcastSitesUpdated } from './WebIntegrationSettingsPanel';
 import './styles.css';
 import PublicSitesCatalog from './PublicSitesCatalog.jsx';
 
@@ -83,8 +85,6 @@ const navGroups = [
     label: 'Workspace',
     items: [
       ['dashboard', 'Dashboard'],
-      ['sites', 'Sites'],
-      ['sites-catalog', 'Live Sites Cards'],
       ['campaigns', 'Latest Booking'],
       ['occupancy', 'Campaign Tracker'],
       ['campaign-details', 'Campaign Details'],
@@ -1750,9 +1750,9 @@ function Layout() {
     return navGroups.map(grp => {
       const items = grp.items.filter(([k]) => {
         if (isAdmin) return true;
-        if (isManager) return k !== 'settings';
-        if (isStaff) return ['dashboard', 'sites', 'campaigns', 'occupancy', 'campaign-details', 'electricity', 'notifications', 'activity'].includes(k);
-        if (isReadOnly) return ['dashboard', 'sites', 'campaigns', 'occupancy', 'campaign-details', 'storage', 'electricity', 'reports', 'notifications', 'activity'].includes(k);
+        if (isManager) return true;
+        if (isStaff) return ['dashboard', 'campaigns', 'occupancy', 'campaign-details', 'electricity', 'notifications', 'activity', 'settings'].includes(k);
+        if (isReadOnly) return ['dashboard', 'campaigns', 'occupancy', 'campaign-details', 'storage', 'electricity', 'reports', 'notifications', 'activity', 'settings'].includes(k);
         return true;
       });
       return { ...grp, items };
@@ -1934,8 +1934,9 @@ function Layout() {
           <div className="scooh-view">
             <Routes>
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/sites" element={<SitesView />} />
-              <Route path="/sites-catalog" element={<PublicSitesCatalog />} />
+              <Route path="/sites" element={<Navigate to="/settings?tab=web-integration" replace />} />
+              <Route path="/web-integration" element={<Navigate to="/settings?tab=web-integration" replace />} />
+              <Route path="/sites-catalog" element={<Navigate to="/settings?tab=web-integration" replace />} />
               <Route path="/campaigns" element={<CampaignTrackerView />} />
               <Route path="/occupancy" element={<OccupancyView />} />
               <Route path="/campaign-details" element={<CampaignDetailsView />} />
@@ -1950,7 +1951,7 @@ function Layout() {
               <Route path="/reports" element={<ReportsView />} />
               <Route path="/notifications" element={<SimpleList endpoint="notifications" title="Notifications" />} />
               <Route path="/activity" element={<SimpleList endpoint="activity" title="Activity Log" />} />
-              <Route path="/settings" element={isAdmin ? <SettingsView /> : <Navigate to="/dashboard" replace />} />
+              <Route path="/settings" element={<SettingsView />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
           </div>
@@ -2072,7 +2073,7 @@ function Dashboard() {
         desc="Live snapshot of the site portfolio, active campaigns, and everything due for action today."
         actions={
           <>
-            <button className="scooh-btn purple-btn" onClick={() => nav('/sites')}>+ Add site</button>
+            <button className="scooh-btn purple-btn" onClick={() => nav('/settings?tab=web-integration')}>+ Add site</button>
             <button className="scooh-btn" onClick={() => nav('/campaigns')}>+ Log booking</button>
           </>
         }
@@ -2080,18 +2081,18 @@ function Dashboard() {
 
       {/* Row 1: Site Portfolio & Live Campaigns */}
       <div className="scooh-kpirow">
-        <div className="scooh-kpi alert" onClick={() => nav('/sites')} style={{ cursor: 'pointer' }} title="View all sites">
+        <div className="scooh-kpi alert" onClick={() => nav('/settings?tab=web-integration')} style={{ cursor: 'pointer' }} title="View all sites in Web Integration">
           <div className="n">{k.total_sites ?? 0}</div>
           <div className="l">Total Sites</div>
           {k.flagged_count > 0 && (
             <div className="scooh-kpi-note">⚠ {k.flagged_count} flagged for review</div>
           )}
         </div>
-        <div className="scooh-kpi good" onClick={() => nav('/sites')} style={{ cursor: 'pointer' }} title="View occupied sites">
+        <div className="scooh-kpi good" onClick={() => nav('/settings?tab=web-integration')} style={{ cursor: 'pointer' }} title="View occupied sites in Web Integration">
           <div className="n">{k.active_sites ?? 0}</div>
           <div className="l">Active Sites</div>
         </div>
-        <div className="scooh-kpi alert" onClick={() => nav('/sites')} style={{ cursor: 'pointer' }} title="View available sites">
+        <div className="scooh-kpi alert" onClick={() => nav('/settings?tab=web-integration')} style={{ cursor: 'pointer' }} title="View available sites in Web Integration">
           <div className="n">{k.nonactive_sites ?? 0}</div>
           <div className="l">Vacant / Available</div>
         </div>
@@ -2332,7 +2333,7 @@ function SitesView() {
       await api.post('/sites/batch-delete', { ids: Array.from(selectedIds), hard: true });
       setSelectedIds(new Set());
       await load();
-      window.dispatchEvent(new CustomEvent('mb-sites-updated'));
+      broadcastSitesUpdated();
     } catch (err) {
       alert('Failed to delete selected sites: ' + (err.response?.data?.message || err.message));
     }
@@ -2347,7 +2348,7 @@ function SitesView() {
       else await api.post('/sites', data);
       setEdit(null);
       await load();
-      window.dispatchEvent(new CustomEvent('mb-sites-updated'));
+      broadcastSitesUpdated();
     } catch (err) {
       alert('Error saving site: ' + (err.response?.data?.message || err.message));
     } finally {
@@ -2365,7 +2366,7 @@ function SitesView() {
           return next;
         });
         await load();
-        window.dispatchEvent(new CustomEvent('mb-sites-updated'));
+        broadcastSitesUpdated();
       } catch (err) {
         alert('Failed to delete site: ' + (err.response?.data?.message || err.message));
       }
@@ -2413,7 +2414,7 @@ function SitesView() {
       saveCachedPhotosForSite(siteCode, serverImgs);
     }
     await load();
-    window.dispatchEvent(new CustomEvent('mb-sites-updated'));
+    broadcastSitesUpdated();
   }
 
   async function handleDirectExcelImport(e) {
@@ -2426,7 +2427,7 @@ function SitesView() {
       const r = await api.post('/import/xlsx', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       alert(`✓ Excel Import Successful!\n\n${r.data.message || `Processed ${r.data.rows} sites (${r.data.updated} updated, ${r.data.created} created).`}`);
       await load();
-      window.dispatchEvent(new CustomEvent('mb-sites-updated'));
+      broadcastSitesUpdated();
     } catch (err) {
       alert('Excel Import failed: ' + (err.response?.data?.message || err.message));
     } finally {
@@ -2445,7 +2446,7 @@ function SitesView() {
       setSelectedIds(new Set());
       setSites([]);
       await load();
-      window.dispatchEvent(new CustomEvent('mb-sites-updated'));
+      broadcastSitesUpdated();
       alert('✓ All sites cleaned from database! Ready for fresh Excel import.');
     } catch (err) {
       alert('Failed to clear sites: ' + (err.response?.data?.message || err.message));
@@ -13787,7 +13788,9 @@ function ReportsView() {
 
 function SettingsView() {
   const [s, setS] = useState(defaultSettings || {});
-  const [activeTab, setActiveTab] = useState('general');
+  const location = useLocation();
+  const initialTab = new URLSearchParams(location.search).get('tab') || 'general';
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [saved, setSaved] = useState(false);
   const [users, setUsers] = useState([]);
   const [userModal, setUserModal] = useState(null);
@@ -13797,6 +13800,11 @@ function SettingsView() {
   const currentUser = getCurrentUser();
   const currentRole = getCurrentRole();
   const isAdmin = currentRole === 'admin';
+
+  useEffect(() => {
+    const t = new URLSearchParams(location.search).get('tab');
+    if (t) setActiveTab(t);
+  }, [location.search]);
 
   useEffect(() => {
     api.get('/settings').then(r => {
@@ -13873,7 +13881,15 @@ function SettingsView() {
         title="Settings"
         desc="Manage company defaults, operational rules, notifications, proposal preferences and data retention."
         actions={
-          isAdmin ? (
+          activeTab === 'web-integration' ? (
+            <button
+              type="button"
+              className="scooh-btn purple-btn"
+              onClick={() => window.open('/embed/sites', '_blank')}
+            >
+              <span>🚀</span> Open Live Web View
+            </button>
+          ) : isAdmin ? (
             activeTab !== 'users' ? (
               <button type="button" className="scooh-btn purple-btn" onClick={() => saveSettings()}>
                 Save Changes
@@ -13939,6 +13955,30 @@ function SettingsView() {
             onClick={() => setActiveTab('users')}
           >
             User Management
+          </button>
+          <button
+            type="button"
+            id="btn-settings-web-integration"
+            className={activeTab === 'web-integration' ? 'active' : ''}
+            onClick={() => setActiveTab('web-integration')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              borderLeft: activeTab === 'web-integration' ? '3px solid #8b5cf6' : '3px solid transparent'
+            }}
+          >
+            <span style={{ fontSize: '15px' }}>🌐</span>
+            <span>Web Integration</span>
+            <span style={{
+              marginLeft: 'auto',
+              fontSize: '9px',
+              fontWeight: 800,
+              padding: '2px 6px',
+              borderRadius: '8px',
+              background: 'rgba(16, 185, 129, 0.2)',
+              color: '#34d399'
+            }}>LIVE</span>
           </button>
         </aside>
 
@@ -14464,6 +14504,16 @@ function SettingsView() {
                 </div>
               </>
             )}
+          </section>
+
+          {/* Web Integration Section - Exclusively hosts Sites & Web Integration Hub */}
+          <section
+            className={`scooh-settings-section ${activeTab === 'web-integration' ? 'active' : ''}`}
+            style={activeTab === 'web-integration' ? { padding: '20px', background: 'transparent', border: 'none', boxShadow: 'none' } : undefined}
+          >
+            <WebIntegrationSettingsPanel>
+              <SitesView />
+            </WebIntegrationSettingsPanel>
           </section>
         </div>
       </div>
@@ -15107,9 +15157,11 @@ function App() {
     <ErrorBoundary>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/sites-catalog" element={<PublicSitesCatalog />} />
-        <Route path="/public-sites" element={<PublicSitesCatalog />} />
-        <Route path="/embed/sites" element={<PublicSitesCatalog embed={true} />} />
+        <Route path="/embed/sites" element={<WebIntegrationPublicView />} />
+        <Route path="/public/sites" element={<WebIntegrationPublicView />} />
+        <Route path="/web-integration/sites" element={<WebIntegrationPublicView />} />
+        <Route path="/public-sites" element={<WebIntegrationPublicView />} />
+        <Route path="/sites-catalog" element={<WebIntegrationPublicView />} />
         <Route path="/*" element={<Guard><Layout /></Guard>} />
       </Routes>
     </ErrorBoundary>
