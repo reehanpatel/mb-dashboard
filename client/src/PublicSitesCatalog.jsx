@@ -45,8 +45,23 @@ export default function PublicSitesCatalog({ embed = false }) {
   const fetchSites = async (dateParam = '') => {
     setLoading(true);
     try {
-      const url = dateParam ? `/api/public/sites?date=${dateParam}` : '/api/public/sites';
-      const res = await axios.get(url, { timeout: 8000 });
+      const params = new URLSearchParams(window.location.search);
+      const keyParam = params.get('key') || params.get('api_key') || params.get('apiKey') || '';
+
+      const qParams = new URLSearchParams();
+      if (dateParam) qParams.set('date', dateParam);
+      if (keyParam) qParams.set('api_key', keyParam);
+      const qs = qParams.toString() ? `?${qParams.toString()}` : '';
+
+      const headers = {};
+      if (keyParam) {
+        headers['x-api-key'] = keyParam;
+      } else {
+        const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await axios.get(`/api/public/sites${qs}`, { headers, timeout: 8000 });
       if (res.data && res.data.sites && res.data.sites.length > 0) {
         setSites(res.data.sites);
         if (res.data.company) setCompany(res.data.company);

@@ -23,10 +23,13 @@ export default function WebIntegrationPublicView() {
 
   // URL query options for customized embedding
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const apiKeyParam = urlParams.get('key') || urlParams.get('api_key') || urlParams.get('apiKey') || '';
   const hideHeader = urlParams.get('header') === '0' || urlParams.get('hide_header') === '1';
   const hideRates = urlParams.get('hide_rates') === '1';
   const initialCity = urlParams.get('city') || '';
   const initialMedia = urlParams.get('media_type') || '';
+
+  const [unauthorized, setUnauthorized] = useState(false);
 
   useEffect(() => {
     if (initialCity) setCityFilter(initialCity);
@@ -35,14 +38,31 @@ export default function WebIntegrationPublicView() {
 
   const [dateFilter, setDateFilter] = useState('');
 
-  // Fetch sites from public unauthenticated endpoint
+  // Fetch sites from key-protected endpoint
   const fetchSites = async (isBackground = false, targetDate = dateFilter) => {
     if (!isBackground) setLoading(true);
     try {
-      const queryParam = targetDate ? `?date=${encodeURIComponent(targetDate)}` : '';
-      const res = await fetch(`/api/public/sites${queryParam}`);
+      const qParams = new URLSearchParams();
+      if (targetDate) qParams.set('date', targetDate);
+      if (apiKeyParam) qParams.set('api_key', apiKeyParam);
+      const queryString = qParams.toString() ? `?${qParams.toString()}` : '';
+
+      const headers = {};
+      if (apiKeyParam) {
+        headers['x-api-key'] = apiKeyParam;
+      } else {
+        const token = localStorage.getItem('token') || localStorage.getItem('auth_token') || sessionStorage.getItem('token');
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch(`/api/public/sites${queryString}`, { headers });
+      if (res.status === 401) {
+        setUnauthorized(true);
+        throw new Error('API Key Required: Access restricted to authorized clients with a valid API key.');
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
+      setUnauthorized(false);
       const rawList = Array.isArray(json?.data) ? json.data : (Array.isArray(json?.sites) ? json.sites : []);
       const normalized = rawList.map(s => {
         const isAvail = s.is_available !== undefined
@@ -66,7 +86,7 @@ export default function WebIntegrationPublicView() {
         triggerSyncAnimation();
       }
     } catch (err) {
-      console.warn('Public sites fetch fallback:', err);
+      console.warn('Public sites fetch notice:', err);
       if (!isBackground) setError(err.message);
     } finally {
       if (!isBackground) setLoading(false);
@@ -81,10 +101,11 @@ export default function WebIntegrationPublicView() {
   useEffect(() => {
     fetchSites();
 
-    // 1. Server-Sent Events (SSE) for Real-Time Auto-Sync
+    // 1. Server-Sent Events (SSE) for Real-Time Auto-Sync (with API key)
     let sse = null;
     try {
-      sse = new EventSource('/api/public/sites/stream');
+      const streamParam = apiKeyParam ? `?api_key=${encodeURIComponent(apiKeyParam)}` : '';
+      sse = new EventSource(`/api/public/sites/stream${streamParam}`);
       sse.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -125,7 +146,7 @@ export default function WebIntegrationPublicView() {
       if (channel) channel.close();
       clearInterval(interval);
     };
-  }, []);
+  }, [apiKeyParam]);
 
   const cities = useMemo(() => Array.from(new Set(sites.map(s => s.city).filter(Boolean))).sort(), [sites]);
   const mediaTypes = useMemo(() => Array.from(new Set(sites.map(s => s.media_type).filter(Boolean))).sort(), [sites]);
@@ -295,7 +316,35 @@ export default function WebIntegrationPublicView() {
       </section>
 
       {/* Main Grid View */}
-      {loading ? (
+      {unauthorized ? (
+        <div className="mb-error-state" style={{ maxWidth: '580px', margin: '40px auto', padding: '36px 28px', textAlign: 'center', background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(239,68,68,0.45)', borderRadius: '16px', boxShadow: '0 20px 50px rgba(0,0,0,0.5)' }}>
+          <div style={{ fontSize: '48px', marginBottom: '14px' }}>🔒</div>
+          <h2 style={{ fontSize: '22px', fontWeight: 800, color: '#f87171', margin: '0 0 10px' }}>Access Denied • API Key Required</h2>
+          <p style={{ fontSize: '14px', color: '#cbd5e1', lineHeight: '1.6', margin: '0 0 20px' }}>
+            This outdoor inventory API and web directory is protected and private. A valid integration API key is required to view live sites and rates.
+          </p>
+          <div style={{ background: 'rgba(0,0,0,0.4)', padding: '14px 16px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)', fontSize: '12.5px', color: '#94a3b8', textAlign: 'left', margin: '0 0 20px', lineHeight: '1.6' }}>
+            <strong style={{ color: '#e2e8f0', display: 'block', marginBottom: '4px' }}>Authorized Access Instructions:</strong>
+            1. Append your key to this URL: <code style={{ color: '#38bdf8' }}>?key=YOUR_API_KEY</code><br/>
+            2. Or copy the authorized embed code directly from your dashboard in <strong>Settings &gt; Web Integration</strong>.
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const entered = window.prompt('Please enter your Media Buzz API Key:');
+              if (entered && entered.trim()) {
+                const u = new URL(window.location.href);
+                u.searchParams.set('key', entered.trim());
+                window.location.href = u.toString();
+              }
+            }}
+            className="mb-btn mb-btn-primary"
+            style={{ padding: '10px 22px', fontSize: '14px' }}
+          >
+            🔑 Enter API Key
+          </button>
+        </div>
+      ) : loading ? (
         <div className="mb-loading-state">
           <div className="mb-spinner"></div>
           <p>Loading live outdoor inventory...</p>

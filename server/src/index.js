@@ -6,7 +6,7 @@ try {
 } catch (e) {}
 import {pool,q} from './db.js';import {auth,admin,sign,managerOrAdmin,notViewer,requireRole} from './auth.js';
 import {computeAllOccupied, canonicalSiteCode, getConflictSummary, syncLinkedCampaigns, deleteLinkedCampaigns, batchDeleteLinkedCampaigns, syncAllLinkedCampaigns} from './siteHierarchy.js';
-import { registerPublicRoutes } from './publicRoutes.js';
+import { registerPublicRoutes, requireIntegrationApiKey, getOrGenerateIntegrationApiKey, regenerateIntegrationApiKey } from './publicRoutes.js';
 process.on('uncaughtException', err => {
   console.error('[Fatal] Uncaught Exception:', err.message);
 });
@@ -30,13 +30,13 @@ app.use(['/embed', '/api/public'], (req, res, next) => {
   res.removeHeader('X-Frame-Options');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, X-Api-Key');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 });
 app.use(cors({origin:true,credentials:true}));
 app.use(express.json({limit:'10mb'}));
-registerPublicRoutes(app);
+registerPublicRoutes(app, { auth, admin, managerOrAdmin, notifySitesUpdated });
 app.use((req, res, next) => {
   res.setTimeout(25000, () => {
     if (!res.headersSent) {
@@ -539,81 +539,8 @@ export function notifySitesUpdated(metadata = {}) {
   return count;
 }
 
-// Public API for external web integration
-app.get('/api/public/sites', async (req, res) => {
-  try {
-    const protocol = (req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
-    const host = (req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000').split(',')[0].trim();
-    const baseUrl = `${protocol}://${host}`;
-
-    const makeFullUrl = (url) => {
-      if (!url || typeof url !== 'string') return '';
-      const trimmed = url.trim();
-      if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) return trimmed;
-      const clean = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
-      return `${baseUrl}${clean}`;
-    };
-
-    const rows = await q("SELECT * FROM sites WHERE record_status != 'archived' ORDER BY site_code ASC");
-    const formatted = rows.map(r => {
-      let f = {};
-      try { f = typeof r.flags === 'string' ? JSON.parse(r.flags) : (r.flags || {}); } catch {}
-      const rawImages = Array.isArray(f.ppt_images) ? f.ppt_images : [];
-      const fullPhotos = rawImages.map(makeFullUrl).filter(Boolean);
-      const primaryPhoto = fullPhotos[0] || null;
-
-      return {
-        id: r.id,
-        site_code: r.site_code,
-        city: r.city || '',
-        area: r.area || '',
-        address: r.address || '',
-        media_type: r.media_type || 'Billboard',
-        lighting: r.lighting || 'FL',
-        facing: r.facing || '',
-        size: r.size || '',
-        width: r.width,
-        height: r.height,
-        orientation: r.orientation || '',
-        ownership: r.ownership || '',
-        availability: f.ppt_availability || r.availability || 'Available',
-        status: f.ppt_availability || r.availability || 'Available',
-        monthly_rate: f.ppt_rate || r.monthly_rate || 0,
-        latitude: r.latitude,
-        longitude: r.longitude,
-        maps_url: r.maps_url || (r.latitude && r.longitude ? `https://www.google.com/maps?q=${r.latitude},${r.longitude}` : ''),
-        gps: r.gps || '',
-        notes: r.notes || '',
-        photos: fullPhotos,
-        images: fullPhotos,
-        primary_photo: primaryPhoto,
-        photo_url: primaryPhoto,
-        raw_photos: rawImages,
-        updated_at: r.updated_at
-      };
-    });
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.json({
-      success: true,
-      count: formatted.length,
-      base_url: baseUrl,
-      full_json_url: `${baseUrl}/api/public/sites`,
-      full_stream_url: `${baseUrl}/api/public/sites/stream`,
-      full_embed_url: `${baseUrl}/embed/sites`,
-      full_catalog_url: `${baseUrl}/sites-catalog`,
-      data: formatted,
-      sites: formatted,
-      updated_at: new Date().toISOString()
-    });
-  } catch (err) {
-    console.error('Error fetching public sites:', err);
-    res.status(500).json({ success: false, message: 'Failed to fetch sites: ' + err.message });
-  }
-});
-
-// Real-Time Server-Sent Events (SSE) Stream for Integrated Web Pages
-app.get('/api/public/sites/stream', (req, res) => {
+// Real-Time Server-Sent Events (SSE) Stream for Integrated Web Pages (API Key Protected)
+app.get('/api/public/sites/stream', requireIntegrationApiKey, (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');

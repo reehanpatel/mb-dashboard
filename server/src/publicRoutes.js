@@ -1,15 +1,146 @@
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 import { q } from './db.js';
 import { canonicalSiteCode, computeAllOccupied } from './siteHierarchy.js';
 
-export function registerPublicRoutes(app) {
-  // Public Sites Catalog & Real-time Availability API for WordPress / Web embedding
-  app.get('/api/public/sites', async (req, res) => {
+let cachedApiKey = null;
+let lastKeyFetchTime = 0;
+
+/**
+ * Retrieve or automatically generate the unique integration API key
+ */
+export async function getOrGenerateIntegrationApiKey(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && cachedApiKey && (now - lastKeyFetchTime < 60000)) {
+    return cachedApiKey;
+  }
+  try {
+    const rows = await q("SELECT setting_value FROM settings WHERE setting_key = 'integration_api_key' LIMIT 1");
+    if (rows && rows.length > 0 && rows[0].setting_value && String(rows[0].setting_value).trim()) {
+      cachedApiKey = String(rows[0].setting_value).trim();
+      lastKeyFetchTime = now;
+      return cachedApiKey;
+    }
+    // Generate new secure key (32 bytes hex prefixed with mb_live_)
+    const generated = 'mb_live_' + crypto.randomBytes(16).toString('hex');
+    await q(`
+      INSERT INTO settings (setting_key, setting_value, updated_at)
+      VALUES ('integration_api_key', ?, NOW())
+      ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()
+    `, [generated]);
+    cachedApiKey = generated;
+    lastKeyFetchTime = now;
+    return cachedApiKey;
+  } catch (err) {
+    console.error('[IntegrationAuth] Failed to load/generate API key:', err);
+    return cachedApiKey || 'mb_live_mediabuzz_default_key';
+  }
+}
+
+/**
+ * Regenerate a new API key and persist to settings table
+ */
+export async function regenerateIntegrationApiKey() {
+  const generated = 'mb_live_' + crypto.randomBytes(16).toString('hex');
+  await q(`
+    INSERT INTO settings (setting_key, setting_value, updated_at)
+    VALUES ('integration_api_key', ?, NOW())
+    ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()
+  `, [generated]);
+  cachedApiKey = generated;
+  lastKeyFetchTime = Date.now();
+  return cachedApiKey;
+}
+
+/**
+ * Middleware to require a valid API key for integration endpoints.
+ * Supports:
+ *  - Header: x-api-key: <key>
+ *  - Query param: ?api_key=<key> or ?key=<key>
+ *  - Header: Authorization: Bearer <key>
+ *  - Authenticated dashboard JWT token (for seamless previewing)
+ */
+export async function requireIntegrationApiKey(req, res, next) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, X-Api-Key');
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+
+  const headerKey = req.headers['x-api-key'] || req.headers['X-Api-Key'];
+  const authHeader = req.headers['authorization'] || '';
+  const bearerKey = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const queryKey = req.query.api_key || req.query.key || req.query.apiKey;
+
+  const candidateKey = String(headerKey || queryKey || (bearerKey.startsWith('mb_live_') ? bearerKey : '') || '').trim();
+  const activeKey = await getOrGenerateIntegrationApiKey();
+
+  if (candidateKey && candidateKey === activeKey) {
+    req.isApiKeyAuthenticated = true;
+    return next();
+  }
+
+  // Also allow authenticated dashboard users (admin, manager, staff)
+  if (bearerKey && !bearerKey.startsWith('mb_live_')) {
+    try {
+      const decoded = jwt.verify(bearerKey, process.env.JWT_SECRET);
+      if (decoded && (decoded.id || decoded.email)) {
+        req.user = decoded;
+        return next();
+      }
+    } catch (_) {}
+  }
+
+  return res.status(401).json({
+    success: false,
+    error: 'Unauthorized',
+    code: 'API_KEY_REQUIRED',
+    message: 'Access restricted: A valid Media Buzz integration API key is required to access the sites inventory. Provide your key via the x-api-key header or ?api_key= query parameter.'
+  });
+}
+
+export function registerPublicRoutes(app, options = {}) {
+  const { auth, admin, managerOrAdmin, notifySitesUpdated } = options;
+
+  // Key management endpoints (authenticated dashboard users)
+  if (auth) {
+    const roleManager = managerOrAdmin || ((req, res, next) => next());
+    const roleAdmin = admin || ((req, res, next) => next());
+
+    app.get('/api/integration/key', auth, roleManager, async (req, res) => {
+      try {
+        const apiKey = await getOrGenerateIntegrationApiKey();
+        res.json({ success: true, apiKey });
+      } catch (err) {
+        res.status(500).json({ success: false, message: 'Failed to retrieve API key: ' + err.message });
+      }
+    });
+
+    app.post('/api/integration/key/regenerate', auth, roleAdmin, async (req, res) => {
+      try {
+        const newKey = await regenerateIntegrationApiKey();
+        if (typeof notifySitesUpdated === 'function') {
+          notifySitesUpdated({ action: 'api_key_regenerated', timestamp: Date.now() });
+        }
+        res.json({ success: true, apiKey: newKey, message: 'New integration API key generated successfully' });
+      } catch (err) {
+        res.status(500).json({ success: false, message: 'Failed to regenerate API key: ' + err.message });
+      }
+    });
+  }
+
+  // Key-protected Sites Catalog & Real-time Availability API for Web Integration
+  app.get('/api/public/sites', requireIntegrationApiKey, async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, X-Api-Key');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
 
     try {
+      const activeKey = await getOrGenerateIntegrationApiKey();
+
       // 1. Fetch active sites
       const sites = await q(`
         SELECT id, site_code, city, area, address, media_type, lighting, facing,
@@ -203,13 +334,14 @@ export function registerPublicRoutes(app) {
       const occupiedCount = publicSites.filter(s => s.status === 'Occupied').length;
       const maintenanceCount = publicSites.filter(s => s.status === 'Maintenance').length;
 
-      const fullJsonUrl = `${baseUrl}/api/public/sites`;
-      const fullStreamUrl = `${baseUrl}/api/public/sites/stream`;
-      const fullEmbedUrl = `${baseUrl}/embed/sites`;
-      const fullCatalogUrl = `${baseUrl}/sites-catalog`;
+      const fullJsonUrl = `${baseUrl}/api/public/sites?api_key=${activeKey}`;
+      const fullStreamUrl = `${baseUrl}/api/public/sites/stream?api_key=${activeKey}`;
+      const fullEmbedUrl = `${baseUrl}/embed/sites?key=${activeKey}`;
+      const fullCatalogUrl = `${baseUrl}/sites-catalog?key=${activeKey}`;
 
       res.json({
         success: true,
+        authenticated: true,
         timestamp: new Date().toISOString(),
         target_date: targetDateStr,
         base_url: baseUrl,
@@ -217,6 +349,7 @@ export function registerPublicRoutes(app) {
         full_stream_url: fullStreamUrl,
         full_embed_url: fullEmbedUrl,
         full_catalog_url: fullCatalogUrl,
+        api_key: activeKey,
         company: {
           name: settings.company_name || 'Media Buzz',
           phone: settings.contact_phone || '+91 98250 00000',
@@ -238,8 +371,8 @@ export function registerPublicRoutes(app) {
     }
   });
 
-  // Public quick stats endpoint for embedding a mini live counter in WordPress headers/widgets
-  app.get('/api/public/stats', async (req, res) => {
+  // Protected quick stats endpoint for embedding a mini live counter
+  app.get('/api/public/stats', requireIntegrationApiKey, async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'no-cache');
     try {
@@ -255,3 +388,4 @@ export function registerPublicRoutes(app) {
     }
   });
 }
+
