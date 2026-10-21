@@ -85,6 +85,7 @@ const navGroups = [
     label: 'Workspace',
     items: [
       ['dashboard', 'Dashboard'],
+      ['sites', 'Sites'],
       ['campaigns', 'Latest Booking'],
       ['occupancy', 'Campaign Tracker'],
       ['campaign-details', 'Campaign Details'],
@@ -1751,8 +1752,8 @@ function Layout() {
       const items = grp.items.filter(([k]) => {
         if (isAdmin) return true;
         if (isManager) return true;
-        if (isStaff) return ['dashboard', 'campaigns', 'occupancy', 'campaign-details', 'electricity', 'notifications', 'activity', 'settings'].includes(k);
-        if (isReadOnly) return ['dashboard', 'campaigns', 'occupancy', 'campaign-details', 'storage', 'electricity', 'reports', 'notifications', 'activity', 'settings'].includes(k);
+        if (isStaff) return ['dashboard', 'sites', 'campaigns', 'occupancy', 'campaign-details', 'electricity', 'notifications', 'activity', 'settings'].includes(k);
+        if (isReadOnly) return ['dashboard', 'sites', 'campaigns', 'occupancy', 'campaign-details', 'storage', 'electricity', 'reports', 'notifications', 'activity', 'settings'].includes(k);
         return true;
       });
       return { ...grp, items };
@@ -1934,7 +1935,7 @@ function Layout() {
           <div className="scooh-view">
             <Routes>
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/sites" element={<Navigate to="/settings?tab=web-integration" replace />} />
+              <Route path="/sites" element={<SitesView />} />
               <Route path="/web-integration" element={<Navigate to="/settings?tab=web-integration" replace />} />
               <Route path="/sites-catalog" element={<Navigate to="/settings?tab=web-integration" replace />} />
               <Route path="/campaigns" element={<CampaignTrackerView />} />
