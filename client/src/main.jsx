@@ -2462,15 +2462,6 @@ function SitesView() {
         actions={
           <>
             <button type="button" className="scooh-btn ghost" onClick={load}>🔄 Refresh</button>
-            <button
-              type="button"
-              className="scooh-btn ghost"
-              style={{ color: '#38bdf8', borderColor: 'rgba(56,189,248,0.4)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-              onClick={() => window.open('/sites-catalog', '_blank')}
-              title="Open the Public Live Sites Cards & WordPress Embed page"
-            >
-              🌐 Live Cards / WP Embed
-            </button>
             {canDelete && (
               <>
                 <label className="scooh-btn ghost" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }} title="Upload Excel spreadsheet to import sites, rates & availability">
@@ -14853,15 +14844,6 @@ function Crud({ entity, title }) {
         actions={
           <>
             <button type="button" className="scooh-btn ghost" onClick={load}>🔄 Refresh</button>
-            <button
-              type="button"
-              className="scooh-btn ghost"
-              style={{ color: '#38bdf8', borderColor: 'rgba(56,189,248,0.4)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-              onClick={() => window.open('/sites-catalog', '_blank')}
-              title="Open the Public Live Sites Cards & WordPress Embed page"
-            >
-              🌐 Live Cards / WP Embed
-            </button>
             {canCreate && (
               <button type="button" className="scooh-btn purple-btn" onClick={() => setEdit({})}>+ Add {title.replace(/s$/, '')}</button>
             )}
