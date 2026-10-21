@@ -6,6 +6,7 @@ try {
 } catch (e) {}
 import {pool,q} from './db.js';import {auth,admin,sign,managerOrAdmin,notViewer,requireRole} from './auth.js';
 import {computeAllOccupied, canonicalSiteCode, getConflictSummary, syncLinkedCampaigns, deleteLinkedCampaigns, batchDeleteLinkedCampaigns, syncAllLinkedCampaigns} from './siteHierarchy.js';
+import { registerPublicRoutes } from './publicRoutes.js';
 process.on('uncaughtException', err => {
   console.error('[Fatal] Uncaught Exception:', err.message);
 });
@@ -26,6 +27,7 @@ app.use(helmet({
 }));
 app.use(cors({origin:true,credentials:true}));
 app.use(express.json({limit:'10mb'}));
+registerPublicRoutes(app);
 app.use((req, res, next) => {
   res.setTimeout(25000, () => {
     if (!res.headersSent) {

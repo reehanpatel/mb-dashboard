@@ -9,6 +9,7 @@ import CampaignDetailsView, { CampaignDetailsModal, SiteDetailsModal } from './C
 import { defaultSettings } from './defaultSites';
 import { canonicalSiteCode, isCombinedSite, getSiteTypeTag, getConflictSummary, getOverlappingSiteCodes, SITE_PANELS } from './siteHierarchy';
 import './styles.css';
+import PublicSitesCatalog from './PublicSitesCatalog.jsx';
 
 // Helper to sanitize display titles and prevent "[Split Face via ...]" or "[Combined Block ...]" from showing anywhere
 export function cleanDisplayTitle(str) {
@@ -59,6 +60,7 @@ class ErrorBoundary extends Component {
 const icons = {
   dashboard: <path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z"/>,
   sites: <path d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5Z"/>,
+  'sites-catalog': <path d="M4 6V4h16v2H4zm0 4h16v8H4v-8zm2 2v4h12v-4H6zm-2 8h16v2H4v-2z"/>,
   campaigns: <path d="M4 4h12a2 2 0 0 1 2 2v2h2v8h-2v2a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm2 4v8h8V8H6Z"/>,
   occupancy: <path d="M4 19h16v2H4v-2Zm1-8h3v6H5v-6Zm5-5h3v11h-3V6Zm5 3h3v8h-3V9Z"/>,
   'campaign-details': <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10H7v-2h10v2zm0-4H7V7h10v2z"/>,
@@ -82,6 +84,7 @@ const navGroups = [
     items: [
       ['dashboard', 'Dashboard'],
       ['sites', 'Sites'],
+      ['sites-catalog', 'Live Sites Cards'],
       ['campaigns', 'Latest Booking'],
       ['occupancy', 'Campaign Tracker'],
       ['campaign-details', 'Campaign Details'],
@@ -129,6 +132,7 @@ const fields = {
 const viewTitles = {
   dashboard: 'Dashboard',
   sites: 'Sites Directory',
+  'sites-catalog': 'Live Sites Cards & Availability',
   campaigns: 'Latest Booking',
   occupancy: 'Campaign Tracker',
   'campaign-details': 'Campaign Details',
@@ -1931,6 +1935,7 @@ function Layout() {
             <Routes>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/sites" element={<SitesView />} />
+              <Route path="/sites-catalog" element={<PublicSitesCatalog />} />
               <Route path="/campaigns" element={<CampaignTrackerView />} />
               <Route path="/occupancy" element={<OccupancyView />} />
               <Route path="/campaign-details" element={<CampaignDetailsView />} />
@@ -2455,6 +2460,15 @@ function SitesView() {
         actions={
           <>
             <button type="button" className="scooh-btn ghost" onClick={load}>🔄 Refresh</button>
+            <button
+              type="button"
+              className="scooh-btn ghost"
+              style={{ color: '#38bdf8', borderColor: 'rgba(56,189,248,0.4)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              onClick={() => window.open('/sites-catalog', '_blank')}
+              title="Open the Public Live Sites Cards & WordPress Embed page"
+            >
+              🌐 Live Cards / WP Embed
+            </button>
             {canDelete && (
               <>
                 <label className="scooh-btn ghost" style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }} title="Upload Excel spreadsheet to import sites, rates & availability">
@@ -14788,6 +14802,15 @@ function Crud({ entity, title }) {
         actions={
           <>
             <button type="button" className="scooh-btn ghost" onClick={load}>🔄 Refresh</button>
+            <button
+              type="button"
+              className="scooh-btn ghost"
+              style={{ color: '#38bdf8', borderColor: 'rgba(56,189,248,0.4)', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              onClick={() => window.open('/sites-catalog', '_blank')}
+              title="Open the Public Live Sites Cards & WordPress Embed page"
+            >
+              🌐 Live Cards / WP Embed
+            </button>
             {canCreate && (
               <button type="button" className="scooh-btn purple-btn" onClick={() => setEdit({})}>+ Add {title.replace(/s$/, '')}</button>
             )}
@@ -15084,6 +15107,9 @@ function App() {
     <ErrorBoundary>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/sites-catalog" element={<PublicSitesCatalog />} />
+        <Route path="/public-sites" element={<PublicSitesCatalog />} />
+        <Route path="/embed/sites" element={<PublicSitesCatalog embed={true} />} />
         <Route path="/*" element={<Guard><Layout /></Guard>} />
       </Routes>
     </ErrorBoundary>
