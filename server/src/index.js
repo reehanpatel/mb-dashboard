@@ -541,11 +541,26 @@ export function notifySitesUpdated(metadata = {}) {
 // Public API for external web integration
 app.get('/api/public/sites', async (req, res) => {
   try {
+    const protocol = (req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+    const host = (req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000').split(',')[0].trim();
+    const baseUrl = `${protocol}://${host}`;
+
+    const makeFullUrl = (url) => {
+      if (!url || typeof url !== 'string') return '';
+      const trimmed = url.trim();
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) return trimmed;
+      const clean = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+      return `${baseUrl}${clean}`;
+    };
+
     const rows = await q("SELECT * FROM sites WHERE record_status != 'archived' ORDER BY site_code ASC");
     const formatted = rows.map(r => {
       let f = {};
       try { f = typeof r.flags === 'string' ? JSON.parse(r.flags) : (r.flags || {}); } catch {}
-      const images = Array.isArray(f.ppt_images) ? f.ppt_images : [];
+      const rawImages = Array.isArray(f.ppt_images) ? f.ppt_images : [];
+      const fullPhotos = rawImages.map(makeFullUrl).filter(Boolean);
+      const primaryPhoto = fullPhotos[0] || null;
+
       return {
         id: r.id,
         site_code: r.site_code,
@@ -561,13 +576,18 @@ app.get('/api/public/sites', async (req, res) => {
         orientation: r.orientation || '',
         ownership: r.ownership || '',
         availability: f.ppt_availability || r.availability || 'Available',
+        status: f.ppt_availability || r.availability || 'Available',
         monthly_rate: f.ppt_rate || r.monthly_rate || 0,
         latitude: r.latitude,
         longitude: r.longitude,
-        maps_url: r.maps_url || '',
+        maps_url: r.maps_url || (r.latitude && r.longitude ? `https://www.google.com/maps?q=${r.latitude},${r.longitude}` : ''),
         gps: r.gps || '',
         notes: r.notes || '',
-        images,
+        photos: fullPhotos,
+        images: fullPhotos,
+        primary_photo: primaryPhoto,
+        photo_url: primaryPhoto,
+        raw_photos: rawImages,
         updated_at: r.updated_at
       };
     });
@@ -576,7 +596,13 @@ app.get('/api/public/sites', async (req, res) => {
     res.json({
       success: true,
       count: formatted.length,
+      base_url: baseUrl,
+      full_json_url: `${baseUrl}/api/public/sites`,
+      full_stream_url: `${baseUrl}/api/public/sites/stream`,
+      full_embed_url: `${baseUrl}/embed/sites`,
+      full_catalog_url: `${baseUrl}/sites-catalog`,
       data: formatted,
+      sites: formatted,
       updated_at: new Date().toISOString()
     });
   } catch (err) {

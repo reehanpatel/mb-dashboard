@@ -83,6 +83,21 @@ export function registerPublicRoutes(app) {
         settings = Object.fromEntries(settingsRows.map(r => [r.setting_key, r.setting_value]));
       } catch (_) {}
 
+      // Base URL resolution for full absolute URLs in external integrations
+      const protocol = (req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+      const host = (req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000').split(',')[0].trim();
+      const baseUrl = `${protocol}://${host}`;
+
+      const makeFullUrl = (url) => {
+        if (!url || typeof url !== 'string') return '';
+        const trimmed = url.trim();
+        if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:')) {
+          return trimmed;
+        }
+        const cleanPath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+        return `${baseUrl}${cleanPath}`;
+      };
+
       const publicSites = sites.map(s => {
         const code = canonicalSiteCode(s.site_code);
         const conflictReason = occupiedMap.get(code);
@@ -91,7 +106,9 @@ export function registerPublicRoutes(app) {
         try { flags = typeof s.flags === 'string' ? JSON.parse(s.flags) : (s.flags || {}); } catch (_) {}
         if (Array.isArray(flags)) flags = { ppt_images: flags };
 
-        const images = Array.isArray(flags.ppt_images) ? flags.ppt_images : [];
+        const rawImages = Array.isArray(flags.ppt_images) ? flags.ppt_images : [];
+        const fullPhotos = rawImages.map(makeFullUrl).filter(Boolean);
+        const primaryPhoto = fullPhotos[0] || null;
 
         const currentCamp = campaignMapByCode[code]?.current;
         const upcomingCamp = campaignMapByCode[code]?.upcoming;
@@ -130,7 +147,10 @@ export function registerPublicRoutes(app) {
           latitude: s.latitude,
           longitude: s.longitude,
           maps_url: s.maps_url || (s.latitude && s.longitude ? `https://www.google.com/maps?q=${s.latitude},${s.longitude}` : ''),
-          photos: images,
+          photos: fullPhotos,
+          primary_photo: primaryPhoto,
+          photo_url: primaryPhoto,
+          raw_photos: rawImages,
           is_available: status === 'Available',
           status,
           available_from: availableFrom,
@@ -143,10 +163,20 @@ export function registerPublicRoutes(app) {
       const occupiedCount = publicSites.filter(s => s.status === 'Occupied').length;
       const maintenanceCount = publicSites.filter(s => s.status === 'Maintenance').length;
 
+      const fullJsonUrl = `${baseUrl}/api/public/sites`;
+      const fullStreamUrl = `${baseUrl}/api/public/sites/stream`;
+      const fullEmbedUrl = `${baseUrl}/embed/sites`;
+      const fullCatalogUrl = `${baseUrl}/sites-catalog`;
+
       res.json({
         success: true,
         timestamp: new Date().toISOString(),
         target_date: targetDateStr,
+        base_url: baseUrl,
+        full_json_url: fullJsonUrl,
+        full_stream_url: fullStreamUrl,
+        full_embed_url: fullEmbedUrl,
+        full_catalog_url: fullCatalogUrl,
         company: {
           name: settings.company_name || 'Media Buzz',
           phone: settings.contact_phone || '+91 98250 00000',
@@ -159,7 +189,8 @@ export function registerPublicRoutes(app) {
           occupied: occupiedCount,
           maintenance: maintenanceCount
         },
-        sites: publicSites
+        sites: publicSites,
+        data: publicSites
       });
     } catch (err) {
       console.error('Error fetching public sites:', err);

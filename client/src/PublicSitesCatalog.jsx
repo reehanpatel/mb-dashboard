@@ -653,16 +653,26 @@ add_shortcode('mediabuzz_sites', 'mb_display_live_sites_catalog');`}</pre>
               {embedTab === 'api' && (
                 <div>
                   <p style={{ fontSize: '13px', margin: '0 0 8px 0', color: '#cbd5e1' }}>
-                    Fetch live runtime availability directly in custom WordPress PHP or JavaScript:
+                    Fetch live runtime availability directly in custom WordPress PHP or JavaScript (all photo URLs are full & absolute):
                   </p>
-                  <pre className="psc-code-block">{`GET ${currentHost}/api/public/sites\nGET ${currentHost}/api/public/sites?date=2026-11-01`}</pre>
-                  <button
-                    type="button"
-                    className="psc-btn-copy"
-                    onClick={() => copyToClipboard(`${currentHost}/api/public/sites`)}
-                  >
-                    {copied ? '✓ Copied to Clipboard!' : '📋 Copy API Endpoint'}
-                  </button>
+                  <pre className="psc-code-block">{`${currentHost}/api/public/sites\n${currentHost}/api/public/sites?date=2026-11-01`}</pre>
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                    <button
+                      type="button"
+                      className="psc-btn-copy"
+                      onClick={() => copyToClipboard(`${currentHost}/api/public/sites`)}
+                    >
+                      {copied ? '✓ Copied to Clipboard!' : '📋 Copy Full JSON URL'}
+                    </button>
+                    <button
+                      type="button"
+                      className="psc-btn-copy"
+                      style={{ background: '#334155' }}
+                      onClick={() => window.open(`${currentHost}/api/public/sites`, '_blank')}
+                    >
+                      Open JSON ↗
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

@@ -90,10 +90,21 @@ export default function WebIntegrationSettingsPanel({ children }) {
           <button
             type="button"
             className="scooh-btn"
+            onClick={() => copyToClipboard(apiUrl, 'banner_json')}
+            title="Copy full JSON API endpoint URL for external website integration"
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#38bdf8', borderColor: 'rgba(56,189,248,0.4)' }}
+          >
+            <span>{copiedCode === 'banner_json' ? '✓' : '🔗'}</span>
+            {copiedCode === 'banner_json' ? 'Full JSON URL Copied!' : 'Copy Full JSON URL'}
+          </button>
+
+          <button
+            type="button"
+            className="scooh-btn"
             onClick={() => setShowEmbedKit(!showEmbedKit)}
             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
-            <span>📋</span> {showEmbedKit ? 'Hide Embed Kit' : 'Get Embed Code'}
+            <span>📋</span> {showEmbedKit ? 'Hide Integration Kit' : 'Get Embed & API URLs'}
           </button>
 
           <button
@@ -122,15 +133,23 @@ export default function WebIntegrationSettingsPanel({ children }) {
         </div>
       )}
 
-      {/* Embed Code Drawer */}
+      {/* Embed Code & API Drawer */}
       {showEmbedKit && (
         <div className="web-integration-kit-drawer">
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-            <h4 className="web-integration-kit-title">Website Integration Code & Embed Options</h4>
-            <span style={{ fontSize: '11.5px', color: '#94a3b8' }}>Compatible with WordPress, Webflow, Shopify, React, HTML</span>
+            <h4 className="web-integration-kit-title">Website Integration & Full JSON API</h4>
+            <span style={{ fontSize: '11.5px', color: '#94a3b8' }}>Compatible with WordPress, Webflow, Shopify, React, PHP & Mobile Apps</span>
           </div>
 
           <div className="web-integration-tabs-row">
+            <button
+              type="button"
+              className={`scooh-btn ${activeCodeTab === 'api' ? 'purple-btn' : ''}`}
+              onClick={() => setActiveCodeTab('api')}
+              style={{ padding: '6px 12px', fontSize: '12px' }}
+            >
+              ⚡ Full JSON API (REST)
+            </button>
             <button
               type="button"
               className={`scooh-btn ${activeCodeTab === 'iframe' ? 'purple-btn' : ''}`}
@@ -155,15 +174,94 @@ export default function WebIntegrationSettingsPanel({ children }) {
             >
               Direct Public URL
             </button>
-            <button
-              type="button"
-              className={`scooh-btn ${activeCodeTab === 'api' ? 'purple-btn' : ''}`}
-              onClick={() => setActiveCodeTab('api')}
-              style={{ padding: '6px 12px', fontSize: '12px' }}
-            >
-              REST API & SSE Stream
-            </button>
           </div>
+
+          {activeCodeTab === 'api' && (
+            <div>
+              <p style={{ margin: '0 0 10px', fontSize: '12.5px', color: '#cbd5e1' }}>
+                Use this <strong>Full JSON API URL</strong> to pull live sites inventory and availability directly into WordPress, Webflow, mobile apps, or custom frontends. All photos are returned with full absolute URLs.
+              </p>
+
+              {/* Primary Full JSON API URL */}
+              <div style={{ marginBottom: '14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <strong style={{ fontSize: '12px', color: '#a78bfa' }}>Full JSON API Endpoint URL:</strong>
+                  <span style={{ fontSize: '11px', color: '#34d399', fontWeight: 700 }}>✓ CORS Enabled for All Domains</span>
+                </div>
+                <div className="web-integration-code-box" style={{ fontSize: '13px', color: '#f8fafc', fontWeight: 600 }}>
+                  {apiUrl}
+                </div>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="scooh-btn purple-btn"
+                    onClick={() => copyToClipboard(apiUrl, 'api_main')}
+                  >
+                    {copiedCode === 'api_main' ? '✓ Copied Full JSON URL!' : '📋 Copy Full JSON URL'}
+                  </button>
+                  <button
+                    type="button"
+                    className="scooh-btn"
+                    onClick={() => window.open(apiUrl, '_blank')}
+                  >
+                    🚀 Open JSON Endpoint in New Tab ↗
+                  </button>
+                </div>
+              </div>
+
+              {/* Date Filtered URL */}
+              <div style={{ marginBottom: '14px' }}>
+                <strong style={{ fontSize: '11.5px', color: '#cbd5e1', display: 'block', marginBottom: '4px' }}>
+                  Full JSON URL with Date-Availability Filter:
+                </strong>
+                <div className="web-integration-code-box" style={{ fontSize: '12px' }}>
+                  {`${apiUrl}?date=${new Date().toISOString().slice(0, 10)}`}
+                </div>
+                <button
+                  type="button"
+                  className="scooh-btn"
+                  onClick={() => copyToClipboard(`${apiUrl}?date=${new Date().toISOString().slice(0, 10)}`, 'api_date')}
+                  style={{ marginTop: '6px', fontSize: '11.5px', padding: '5px 12px' }}
+                >
+                  {copiedCode === 'api_date' ? '✓ Copied Date URL!' : '📋 Copy Date Filtered URL'}
+                </button>
+              </div>
+
+              {/* Real-time SSE Stream URL */}
+              <div style={{ marginBottom: '14px' }}>
+                <strong style={{ fontSize: '11.5px', color: '#cbd5e1', display: 'block', marginBottom: '4px' }}>
+                  Full Real-time Server-Sent Events (SSE) Stream URL:
+                </strong>
+                <div className="web-integration-code-box" style={{ fontSize: '12px' }}>
+                  {sseUrl}
+                </div>
+                <button
+                  type="button"
+                  className="scooh-btn"
+                  onClick={() => copyToClipboard(sseUrl, 'api_stream')}
+                  style={{ marginTop: '6px', fontSize: '11.5px', padding: '5px 12px' }}
+                >
+                  {copiedCode === 'api_stream' ? '✓ Copied Stream URL!' : '📋 Copy Stream URL'}
+                </button>
+              </div>
+
+              {/* WordPress Integration Example */}
+              <div style={{ marginTop: '14px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '12px' }}>
+                <strong style={{ fontSize: '12px', color: '#cbd5e1', display: 'block', marginBottom: '6px' }}>
+                  WordPress PHP Integration (Copy into functions.php):
+                </strong>
+                <pre className="web-integration-code-box" style={{ whiteSpace: 'pre-wrap', fontSize: '11.5px' }}>
+{`// Fetch live Media Buzz sites in WordPress:
+$response = wp_remote_get('${apiUrl}');
+if (!is_wp_error($response)) {
+    $body = wp_remote_retrieve_body($response);
+    $data = json_decode($body, true);
+    $sites = $data['sites']; // Array of sites with full photo URLs
+}`}
+                </pre>
+              </div>
+            </div>
+          )}
 
           {activeCodeTab === 'iframe' && (
             <div>
@@ -221,30 +319,6 @@ export default function WebIntegrationSettingsPanel({ children }) {
                   Open in New Tab ↗
                 </button>
               </div>
-            </div>
-          )}
-
-          {activeCodeTab === 'api' && (
-            <div>
-              <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#94a3b8' }}>
-                For custom web developers building headless/custom frontends:
-              </p>
-              <div style={{ marginBottom: '8px' }}>
-                <strong style={{ fontSize: '11px', color: '#cbd5e1' }}>JSON API:</strong>
-                <div className="web-integration-code-box">GET {apiUrl}</div>
-              </div>
-              <div>
-                <strong style={{ fontSize: '11px', color: '#cbd5e1' }}>Real-time SSE Stream:</strong>
-                <div className="web-integration-code-box">GET {sseUrl}</div>
-              </div>
-              <button
-                type="button"
-                className="scooh-btn purple-btn"
-                onClick={() => copyToClipboard(apiUrl, 'api')}
-                style={{ marginTop: '10px' }}
-              >
-                {copiedCode === 'api' ? '✓ Copied API URL!' : 'Copy JSON API URL'}
-              </button>
             </div>
           )}
         </div>
