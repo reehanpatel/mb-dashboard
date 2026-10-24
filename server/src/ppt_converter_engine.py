@@ -29,6 +29,8 @@ CANDIDATE_TEMPLATE_PATHS = [
     os.path.join(os.path.dirname(__file__), '..', 'templates', 'Testing  24-10-2026.pptx'),
     os.path.join(r'C:\Users\reeha\Downloads', 'Testing  24-10-2026.pptx'),
     os.path.join(r'C:\Users\reeha\Downloads', 'Testing 24-10-2026.pptx'),
+    os.path.join(r'C:\Users\reeha\Downloads', '22-09-2026 (1).pptx'),
+    os.path.join(r'C:\Users\reeha\Downloads', 'Hari Om Shela Project -29-09-2026.pptx'),
 ]
 
 def find_master_template(explicit_path=None):
@@ -281,12 +283,18 @@ def process_presentation(input_path, output_path, master_template_path=None):
     
     # 2. Populate slides
     def apply_data_to_slide(slide, entry, site_num):
-        # Update Photo (Image 0)
+        # Update Photo (Image 0 or main billboard picture)
         if entry['photo_bytes']:
             try:
                 buf = io.BytesIO(entry['photo_bytes'])
                 new_img_part, rId = slide.part.get_or_add_image_part(buf)
-                pic_sh = slide.shapes[0]
+                pic_sh = None
+                for sh in slide.shapes:
+                    if sh.name == 'Image 0' or (sh.shape_type == pptx.enum.shapes.MSO_SHAPE_TYPE.PICTURE and (sh.width / 914400) > 4.0):
+                        pic_sh = sh
+                        break
+                if not pic_sh:
+                    pic_sh = slide.shapes[0]
                 blip = pic_sh._element.xpath('.//a:blip')[0]
                 blip.set('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed', rId)
             except Exception as e:
@@ -378,21 +386,26 @@ def process_presentation(input_path, output_path, master_template_path=None):
                     elif len(p.runs) == 1:
                         p.runs[0].text = "Location Coordinates:  "
 
-    # Populate first min(n_entries, 5) slides which exist in template
-    for idx in range(min(n_entries, 5)):
+    # Identify site slides in template (between cover slides and closing slide)
+    total_tmpl_slides = len(out_prs.slides)
+    existing_site_slides = max(1, total_tmpl_slides - 3)
+    
+    # Populate existing site slides
+    populate_count = min(n_entries, existing_site_slides)
+    for idx in range(populate_count):
         slide = out_prs.slides[2 + idx]
         apply_data_to_slide(slide, entries[idx], idx + 1)
         
-    # If fewer than 5 entries, cleanly delete remaining template site slides
-    if n_entries < 5:
-        for idx in range(6, 1 + n_entries, -1):
+    # If fewer entries than existing site slides, cleanly delete excess template site slides
+    if n_entries < existing_site_slides:
+        for idx in range(2 + existing_site_slides - 1, 1 + n_entries, -1):
             sldId = out_prs.slides._sldIdLst[idx]
             out_prs.part.drop_rel(sldId.rId)
             out_prs.slides._sldIdLst.remove(sldId)
             
-    # If more than 5 entries, duplicate base slide and update
-    elif n_entries > 5:
-        for idx in range(5, n_entries):
+    # If more entries than existing site slides, duplicate base slide and update
+    elif n_entries > existing_site_slides:
+        for idx in range(existing_site_slides, n_entries):
             new_slide = duplicate_slide(out_prs, base_site_slide)
             apply_data_to_slide(new_slide, entries[idx], idx + 1)
             
