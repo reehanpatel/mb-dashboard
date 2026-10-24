@@ -27,8 +27,13 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Archives & references
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Scratch & temporary workspace files
+scratch/
+plugin-reference/
 *.zip
 *.tar.gz
-plugin-reference/
-scratch/
