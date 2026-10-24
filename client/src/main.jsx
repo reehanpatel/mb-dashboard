@@ -12,6 +12,7 @@ import WebIntegrationPublicView from './WebIntegrationPublicView';
 import WebIntegrationSettingsPanel, { broadcastSitesUpdated } from './WebIntegrationSettingsPanel';
 import './styles.css';
 import PublicSitesCatalog from './PublicSitesCatalog.jsx';
+import PptConverterView from './PptConverterView';
 
 // Helper to sanitize display titles and prevent "[Split Face via ...]" or "[Combined Block ...]" from showing anywhere
 export function cleanDisplayTitle(str) {
@@ -68,6 +69,7 @@ const icons = {
   'campaign-details': <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10H7v-2h10v2zm0-4H7V7h10v2z"/>,
   proposals: <path d="M6 2h9l5 5v15H6V2Zm8 2v5h5M9 13h8v2H9v-2Zm0 4h8v2H9v-2ZM9 9h3v2H9V9Z"/>,
   ppt: <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>,
+  'ppt-converter': <path d="M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-7v2h3a1 1 0 1 1 0 2H8a1 1 0 1 1 0-2h3v-2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 2v10h16V5H4zm5 3l3-2.5V7h3a2 2 0 0 1 2 2v1h-2V9h-3v1.5L9 8zm6 4l-3 2.5V13h-3a2 2 0 0 1-2-2v-1h2v1h3v-1.5l3 2.5z"/>,
   electricity: <path d="M13 2 5 13h6l-1 9 9-13h-6l0-7Z"/>,
   vendors: <path d="M8 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8 1a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 21v-2c0-3 3-5 6-5s6 2 6 5v2H2Zm12.5 0v-2c0-1.35-.43-2.54-1.15-3.5.79-.32 1.69-.5 2.65-.5 3 0 6 2 6 5v1h-7.5Z"/>,
   clients: <path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10ZM3 22v-2c0-4 4-6 9-6s9 2 9 6v2H3Z"/>,
@@ -91,6 +93,7 @@ const navGroups = [
       ['campaign-details', 'Campaign Details'],
       ['proposals', 'Proposal Builder'],
       ['ppt', 'Automated PPT'],
+      ['ppt-converter', 'PPT Converter'],
       ['storage', 'Storage & Archives']
     ]
   },
@@ -139,6 +142,7 @@ const viewTitles = {
   'campaign-details': 'Campaign Details',
   proposals: 'Proposal Builder',
   ppt: 'Automated PPT',
+  'ppt-converter': 'PPT Converter',
   electricity: 'Electricity & Meters',
   vendors: 'Vendors Directory',
   clients: 'Clients Directory',
@@ -1752,8 +1756,8 @@ function Layout() {
       const items = grp.items.filter(([k]) => {
         if (isAdmin) return true;
         if (isManager) return true;
-        if (isStaff) return ['dashboard', 'sites', 'campaigns', 'occupancy', 'campaign-details', 'electricity', 'notifications', 'activity', 'settings'].includes(k);
-        if (isReadOnly) return ['dashboard', 'sites', 'campaigns', 'occupancy', 'campaign-details', 'storage', 'electricity', 'reports', 'notifications', 'activity', 'settings'].includes(k);
+        if (isStaff) return ['dashboard', 'sites', 'campaigns', 'occupancy', 'campaign-details', 'ppt-converter', 'electricity', 'notifications', 'activity', 'settings'].includes(k);
+        if (isReadOnly) return ['dashboard', 'sites', 'campaigns', 'occupancy', 'campaign-details', 'ppt-converter', 'storage', 'electricity', 'reports', 'notifications', 'activity', 'settings'].includes(k);
         return true;
       });
       return { ...grp, items };
@@ -1943,6 +1947,7 @@ function Layout() {
               <Route path="/campaign-details" element={<CampaignDetailsView />} />
               <Route path="/proposals" element={!isStaff && !isReadOnly ? <ProposalsView /> : <Navigate to="/dashboard" replace />} />
               <Route path="/ppt" element={!isStaff && !isReadOnly ? <PptView /> : <Navigate to="/dashboard" replace />} />
+              <Route path="/ppt-converter" element={<PptConverterView />} />
               <Route path="/electricity" element={<ElectricityView />} />
               <Route path="/vendors" element={!isStaff && !isReadOnly ? <Crud entity="vendors" title="Vendors" /> : <Navigate to="/dashboard" replace />} />
               <Route path="/clients" element={!isStaff && !isReadOnly ? <Crud entity="clients" title="Clients" /> : <Navigate to="/dashboard" replace />} />

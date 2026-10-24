@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import express from 'express';import cors from 'cors';import helmet from 'helmet';import path from 'path';import fs from 'fs';import multer from 'multer';import bcrypt from 'bcryptjs';import {fileURLToPath} from 'url';import * as xlsxModule from 'xlsx';
+import express from 'express';import cors from 'cors';import helmet from 'helmet';import path from 'path';import fs from 'fs';import multer from 'multer';import bcrypt from 'bcryptjs';import {fileURLToPath} from 'url';import * as xlsxModule from 'xlsx';import { execFile } from 'child_process';
 const XLSX = xlsxModule.default || xlsxModule;
 try {
   if (XLSX.set_fs) XLSX.set_fs(fs);
@@ -20,7 +20,11 @@ const rawPort = process.env.PORT || 3000;
 const isNumericPort = /^\d+$/.test(String(rawPort).trim());
 const PORT = isNumericPort ? parseInt(rawPort, 10) : rawPort;
 const uploadDir=path.resolve(__dirname,'..',process.env.UPLOAD_DIR||'uploads');
+const convertedDir=path.resolve(__dirname,'..','converted');
+const templatesDir=path.resolve(__dirname,'..','templates');
 fs.mkdirSync(uploadDir,{recursive:true});
+fs.mkdirSync(convertedDir,{recursive:true});
+fs.mkdirSync(templatesDir,{recursive:true});
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   contentSecurityPolicy: false,
@@ -861,6 +865,94 @@ app.delete('/api/ppt-pages/:key', auth, async (req, res) => {
     res.json({ success: true, key: req.params.key });
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+});
+
+// ==========================================
+// PPT Converter Module Endpoints
+// ==========================================
+app.get('/api/ppt-converter/status', auth, (req, res) => {
+  const engineScript = path.join(__dirname, 'ppt_converter_engine.py');
+  execFile('python', [engineScript, '--check-template'], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    if (err) {
+      return res.status(500).json({ available: false, error: stderr || err.message });
+    }
+    try {
+      const data = JSON.parse(stdout.trim());
+      res.json(data);
+    } catch (parseErr) {
+      res.status(500).json({ available: false, error: 'Failed to parse template status output' });
+    }
+  });
+});
+
+app.post('/api/ppt-converter/convert', auth, upload.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: 'No PowerPoint file uploaded.' });
+  }
+  const inputPath = req.file.path;
+  const originalName = req.file.originalname || '';
+  if (!originalName.toLowerCase().endsWith('.pptx')) {
+    try { fs.unlinkSync(inputPath); } catch (_) {}
+    return res.status(400).json({ message: 'Only .pptx files are supported for conversion.' });
+  }
+
+  const downloadId = `Converted_Testing_Format-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pptx`;
+  const outputPath = path.join(convertedDir, downloadId);
+  const engineScript = path.join(__dirname, 'ppt_converter_engine.py');
+
+  execFile('python', [engineScript, '--input', inputPath, '--output', outputPath], { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
+    // Immediately unlink the raw uploaded presentation to avoid storing customer data
+    try { fs.unlinkSync(inputPath); } catch (_) {}
+
+    if (err) {
+      console.error('[PPT Converter Error]', stderr || err.message);
+      return res.status(500).json({ message: stderr || err.message || 'Conversion processing failed.' });
+    }
+
+    try {
+      const result = JSON.parse(stdout.trim());
+      if (!result.success) {
+        return res.status(400).json({ message: result.error || 'Conversion process failed.' });
+      }
+      result.downloadId = downloadId;
+      result.downloadName = 'Converted_Testing_Format.pptx';
+      res.json(result);
+    } catch (parseErr) {
+      res.status(500).json({ message: 'Failed to parse engine output: ' + parseErr.message });
+    }
+  });
+});
+
+app.get('/api/ppt-converter/download/:downloadId', auth, (req, res) => {
+  const downloadId = path.basename(req.params.downloadId || '');
+  if (!downloadId || !downloadId.endsWith('.pptx')) {
+    return res.status(400).send('Invalid download identifier.');
+  }
+  const filePath = path.join(convertedDir, downloadId);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send('Converted file expired or not found.');
+  }
+  res.setHeader('Content-Disposition', 'attachment; filename="Converted_Testing_Format.pptx"');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+  res.sendFile(filePath);
+});
+
+app.post('/api/ppt-converter/template', auth, managerOrAdmin, upload.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: 'No template file uploaded.' });
+  }
+  if (!req.file.originalname.toLowerCase().endsWith('.pptx')) {
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+    return res.status(400).json({ message: 'Master template must be a .pptx file.' });
+  }
+  const destPath = path.join(templatesDir, 'Testing 24-10-2026.pptx');
+  try {
+    fs.copyFileSync(req.file.path, destPath);
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
+    res.json({ success: true, message: 'Master template updated successfully.', size: fs.statSync(destPath).size });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update template: ' + err.message });
   }
 });
 
