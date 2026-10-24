@@ -938,6 +938,16 @@ app.get('/api/ppt-converter/download/:downloadId', auth, (req, res) => {
   res.sendFile(filePath);
 });
 
+app.get('/api/ppt-converter/template/download', auth, (req, res) => {
+  const templatePath = path.join(templatesDir, 'Testing 24-10-2026.pptx');
+  if (!fs.existsSync(templatePath)) {
+    return res.status(404).json({ message: 'Master template file not found on server.' });
+  }
+  res.setHeader('Content-Disposition', 'attachment; filename="Testing 24-10-2026.pptx"');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
+  res.sendFile(templatePath);
+});
+
 app.post('/api/ppt-converter/template', auth, managerOrAdmin, upload.single('file'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ message: 'No template file uploaded.' });

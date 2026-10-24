@@ -112,6 +112,24 @@ export default function PptConverterView() {
     }
   };
 
+  // Download master template
+  const handleDownloadTemplate = async () => {
+    try {
+      const res = await api.get('/ppt-converter/template/download', { responseType: 'blob' });
+      const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = templateStatus.filename || 'Testing 24-10-2026.pptx';
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      alert('Failed to download master template: ' + (err.response?.data?.message || err.message));
+    }
+  };
+
   // Convert workflow
   const handleConvert = async () => {
     if (!file || !templateStatus.available || converting) return;
@@ -293,6 +311,20 @@ export default function PptConverterView() {
         </div>
 
         <div className="scooh-ppt-template-actions">
+          {templateStatus.available && (
+            <button
+              type="button"
+              className="scooh-btn secondary"
+              onClick={handleDownloadTemplate}
+              title="Download master template"
+              id="btn-download-master-template"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+              </svg>
+              Download Template
+            </button>
+          )}
           <input
             type="file"
             ref={templateInputRef}
