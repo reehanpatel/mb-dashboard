@@ -41,6 +41,14 @@ try:
 except ImportError:
     pptx = None
 
+import site
+try:
+    for _p in [site.getusersitepackages()] + (site.getsitepackages() if hasattr(site, 'getsitepackages') else []):
+        if _p and _p not in sys.path and os.path.isdir(_p):
+            sys.path.insert(0, _p)
+except Exception:
+    pass
+
 # Optional openpyxl import for Excel-to-PowerPoint conversion
 try:
     import openpyxl
@@ -48,6 +56,14 @@ try:
 except ImportError:
     openpyxl = None
     HAS_OPENPYXL = False
+
+# Optional xlrd import for legacy .xls files
+try:
+    import xlrd
+    HAS_XLRD = True
+except ImportError:
+    xlrd = None
+    HAS_XLRD = False
 
 # The 11 official master template columns from Jade Blue 16-10-2026.xlsx
 MASTER_TEMPLATE_COLUMNS = [
@@ -504,15 +520,182 @@ def extract_entries_pure_zip(input_path):
             
     return entries
 
+# ==============================================================================
+# Robust Multi-Format Excel Loader (openpyxl, xlrd, and pure XML fallback)
+# ==============================================================================
+
+class UniversalCell:
+    def __init__(self, value=""):
+        self.value = value
+
+class XlrdSheetWrapper:
+    def __init__(self, sheet, book):
+        self.sheet = sheet
+        self.book = book
+        self.title = sheet.name
+        self.max_row = sheet.nrows
+        self.max_column = sheet.ncols
+        self._images = []
+
+    def cell(self, row, column):
+        r_idx = row - 1
+        c_idx = column - 1
+        if 0 <= r_idx < self.sheet.nrows and 0 <= c_idx < self.sheet.ncols:
+            c = self.sheet.cell(r_idx, c_idx)
+            val = c.value
+            if HAS_XLRD and xlrd and c.ctype == xlrd.XL_CELL_DATE:
+                try:
+                    import datetime
+                    date_tuple = xlrd.xldate_as_tuple(val, self.book.datemode)
+                    val = datetime.datetime(*date_tuple).strftime('%d-%m-%Y')
+                except Exception:
+                    pass
+            elif HAS_XLRD and xlrd and c.ctype == xlrd.XL_CELL_NUMBER and isinstance(val, (int, float)) and float(val).is_integer():
+                val = int(val)
+            return UniversalCell(val)
+        return UniversalCell("")
+
+class XlrdBookWrapper:
+    def __init__(self, book):
+        self.book = book
+        self.sheetnames = book.sheet_names()
+
+    def __getitem__(self, name):
+        return XlrdSheetWrapper(self.book.sheet_by_name(name), self.book)
+
+    @property
+    def active(self):
+        return XlrdSheetWrapper(self.book.sheet_by_index(0), self.book)
+
+class PureXmlSheetWrapper:
+    def __init__(self, title, rows_data):
+        self.title = title
+        self.rows_data = rows_data # dict of (row_idx, col_idx) -> value
+        max_r = max((k[0] for k in rows_data.keys()), default=0)
+        max_c = max((k[1] for k in rows_data.keys()), default=0)
+        self.max_row = max_r
+        self.max_column = max_c
+        self._images = []
+
+    def cell(self, row, column):
+        return UniversalCell(self.rows_data.get((row, column), ""))
+
+class PureXmlBookWrapper:
+    def __init__(self, sheets_dict):
+        self.sheets_dict = sheets_dict
+        self.sheetnames = list(sheets_dict.keys())
+
+    def __getitem__(self, name):
+        return self.sheets_dict[name]
+
+    @property
+    def active(self):
+        first_key = self.sheetnames[0] if self.sheetnames else 'Sheet1'
+        return self.sheets_dict.get(first_key, PureXmlSheetWrapper('Sheet1', {}))
+
+def parse_col_letter(col_str):
+    num = 0
+    for char in col_str.upper():
+        if 'A' <= char <= 'Z':
+            num = num * 26 + (ord(char) - ord('A') + 1)
+    return num
+
+def load_pure_xml_xlsx(excel_path):
+    """Pure Python standard library fallback parser for .xlsx files (zero external libraries required)."""
+    with zipfile.ZipFile(excel_path, 'r') as z:
+        # 1. Parse shared strings
+        shared_strings = []
+        if 'xl/sharedStrings.xml' in z.namelist():
+            ss_xml = z.read('xl/sharedStrings.xml')
+            root = ET.fromstring(ss_xml)
+            for si in root.findall('{*}si'):
+                text_parts = []
+                for t in si.iter('{*}t'):
+                    if t.text: text_parts.append(t.text)
+                shared_strings.append(''.join(text_parts))
+
+        # 2. Parse sheet names from workbook.xml
+        sheet_map = {}
+        if 'xl/workbook.xml' in z.namelist():
+            wb_xml = z.read('xl/workbook.xml')
+            root = ET.fromstring(wb_xml)
+            for s in root.iter('{*}sheet'):
+                s_name = s.attrib.get('name')
+                s_id = s.attrib.get('sheetId', '1')
+                sheet_map[f"xl/worksheets/sheet{s_id}.xml"] = s_name
+
+        sheets_dict = {}
+        for fname in z.namelist():
+            if fname.startswith('xl/worksheets/sheet') and fname.endswith('.xml'):
+                title = sheet_map.get(fname, os.path.splitext(os.path.basename(fname))[0])
+                s_xml = z.read(fname)
+                root = ET.fromstring(s_xml)
+                rows_data = {}
+                for row_el in root.iter('{*}row'):
+                    r_idx_str = row_el.attrib.get('r')
+                    r_num = int(r_idx_str) if r_idx_str else 1
+                    for c_el in row_el.iter('{*}c'):
+                        cell_ref = c_el.attrib.get('r', '')
+                        m = re.match(r'([A-Za-z]+)(\d+)', cell_ref)
+                        if m:
+                            c_num = parse_col_letter(m.group(1))
+                            r_num = int(m.group(2))
+                        else:
+                            c_num = 1
+                        t_type = c_el.attrib.get('t')
+                        v_el = c_el.find('{*}v')
+                        raw_v = v_el.text if v_el is not None and v_el.text is not None else ""
+                        if t_type == 's' and raw_v.isdigit():
+                            idx = int(raw_v)
+                            val = shared_strings[idx] if idx < len(shared_strings) else raw_v
+                        elif t_type == 'inlineStr':
+                            t_el = c_el.find('.//{*}t')
+                            val = t_el.text if t_el is not None else ""
+                        else:
+                            val = raw_v
+                        rows_data[(r_num, c_num)] = val
+                sheets_dict[title] = PureXmlSheetWrapper(title, rows_data)
+        return PureXmlBookWrapper(sheets_dict)
+
+def load_any_workbook(excel_path):
+    """
+    Universally loads any Excel file (.xlsx or .xls) across all environments:
+    1. Uses xlrd for legacy .xls files
+    2. Uses openpyxl for modern .xlsx files
+    3. Falls back to pure XML Zip parser if openpyxl is not installed or fails
+    """
+    is_xls = excel_path.lower().endswith('.xls')
+    # Check binary header for OLE2
+    try:
+        with open(excel_path, 'rb') as f:
+            header = f.read(8)
+            if header.startswith(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'):
+                is_xls = True
+    except Exception:
+        pass
+
+    if is_xls:
+        if HAS_XLRD and xlrd:
+            book = xlrd.open_workbook(excel_path)
+            return XlrdBookWrapper(book)
+        else:
+            raise ImportError("xlrd library is required to read .xls files. Please install xlrd or save as .xlsx.")
+
+    # Modern .xlsx
+    if HAS_OPENPYXL and openpyxl:
+        try:
+            return openpyxl.load_workbook(excel_path, data_only=True)
+        except Exception as e:
+            sys.stderr.write(f"[Excel Loader] openpyxl failed, falling back to pure XML: {e}\n")
+
+    return load_pure_xml_xlsx(excel_path)
+
 def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None):
     """
     Extracts site entries from an Excel workbook based on the Master Template reference (Jade Blue 16-10-2026.xlsx).
     Leaves missing values blank (Rule 8). Ignores any Terms & Conditions in the Excel sheet (Rule 7).
     """
-    if not HAS_OPENPYXL or not openpyxl:
-        raise ImportError("openpyxl is required to parse Excel files. Please install openpyxl via pip.")
-
-    wb = openpyxl.load_workbook(excel_path, data_only=True)
+    wb = load_any_workbook(excel_path)
     if sheet_name and sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
     else:
@@ -635,17 +818,20 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
 
         entries.append({
             'source_slide': r,
-            'code': '',  # Do not invent site codes
+            'code': f"MB - {len(entries) + 1:02d}",
             'site_number': len(entries) + 1,
-            'sr_no': sr_no,
+            'sr_no': sr_no or str(len(entries) + 1),
             'city': city,
             'location': cleaned_loc or loc,
-            'type': media,
-            'illum': light,
-            'size': size_str,
-            'rate': rate_str,
-            'availability': avail,
-            'coords': coords,
+            'type': media or 'Hoarding',
+            'illum': light or 'BL',
+            'size': size_str or '30x10 ft',
+            'w': w,
+            'h': h,
+            'sq_ft': sq_ft,
+            'rate': rate_str or '',
+            'availability': avail or 'Available',
+            'coords': coords or '',
             'photo_bytes': photo_bytes,
             'review_needed': len(review_flags) > 0,
             'review_flags': review_flags
@@ -655,13 +841,14 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
 
 def inspect_excel(excel_path):
     """
-    Inspects an uploaded Excel workbook, returns sheets, detected headers,
+    Inspects an uploaded Excel workbook (.xlsx or .xls), returns sheets, detected headers,
     master template match status, mapping, and sample rows.
     """
-    if not HAS_OPENPYXL or not openpyxl:
-        return {'success': False, 'error': 'openpyxl library not installed on server.'}
+    try:
+        wb = load_any_workbook(excel_path)
+    except Exception as e:
+        return {'success': False, 'error': f"Failed to open Excel workbook: {str(e)}"}
 
-    wb = openpyxl.load_workbook(excel_path, data_only=True)
     sheet_names = wb.sheetnames
     ws = wb['Sites'] if 'Sites' in sheet_names else wb.active
     
@@ -785,6 +972,206 @@ def inspect_excel(excel_path):
         'termsDetected': terms_detected,
         'termsNotice': "Terms & Conditions present in workbook will be ignored. Official 7-point Media Buzz software Terms & Conditions will be used exclusively."
     }
+
+def merge_companion_excel(ppt_entries, companion_excel_path, column_mapping=None, sheet_name=None):
+    """
+    Extracts site data from companion Excel workbook (availability, coordinates / latitude longitude,
+    rates, media, illumination, etc.) and enriches the PPT entries.
+    Matches by site code / number, location keyword match, or sequential slide order.
+    """
+    try:
+        excel_entries, _, _, _ = extract_entries_from_excel(
+            companion_excel_path,
+            column_mapping=column_mapping,
+            sheet_name=sheet_name
+        )
+    except Exception as e:
+        sys.stderr.write(f"[Companion Excel Error] {e}\n")
+        return ppt_entries
+
+    if not excel_entries:
+        return ppt_entries
+
+    # Build lookup maps
+    code_map = {}
+    sr_map = {}
+    for x in excel_entries:
+        if x.get('code'):
+            code_map[str(x['code']).lower().strip()] = x
+        if x.get('sr_no'):
+            sr_map[str(x['sr_no']).lower().strip()] = x
+
+    for idx, entry in enumerate(ppt_entries):
+        matched = None
+        ppt_code = str(entry.get('code') or '').lower().strip()
+        ppt_num = str(entry.get('site_number') or (idx + 1)).strip()
+
+        # 1. Match by exact code or number
+        if ppt_code and ppt_code in code_map:
+            matched = code_map[ppt_code]
+        elif ppt_num and ppt_num in sr_map:
+            matched = sr_map[ppt_num]
+        elif str(idx + 1) in sr_map:
+            matched = sr_map[str(idx + 1)]
+
+        # 2. Match by location keyword overlap if not matched
+        if not matched and entry.get('location'):
+            ppt_loc_words = set(re.findall(r'\b\w{3,}\b', entry['location'].lower()))
+            best_score = 0
+            best_x = None
+            for x in excel_entries:
+                if x.get('location'):
+                    x_loc_words = set(re.findall(r'\b\w{3,}\b', x['location'].lower()))
+                    overlap = len(ppt_loc_words.intersection(x_loc_words))
+                    if overlap > best_score and overlap >= 2:
+                        best_score = overlap
+                        best_x = x
+            if best_x:
+                matched = best_x
+
+        # 3. Fallback sequential matching
+        if not matched and idx < len(excel_entries):
+            matched = excel_entries[idx]
+
+        # Apply matched fields (e.g. Availability, Latitude Longitude, Rate, etc.)
+        if matched:
+            if matched.get('availability') and str(matched['availability']).strip():
+                entry['availability'] = str(matched['availability']).strip()
+            if matched.get('coords') and str(matched['coords']).strip():
+                entry['coords'] = str(matched['coords']).strip()
+            if matched.get('rate') and str(matched['rate']).strip():
+                entry['rate'] = str(matched['rate']).strip()
+            if matched.get('city') and str(matched['city']).strip():
+                entry['city'] = str(matched['city']).strip()
+            if matched.get('type') and str(matched['type']).strip():
+                entry['type'] = str(matched['type']).strip()
+            if matched.get('illum') and str(matched['illum']).strip():
+                entry['illum'] = str(matched['illum']).strip()
+            if matched.get('size') and str(matched['size']).strip():
+                entry['size'] = str(matched['size']).strip()
+            if matched.get('location') and (not entry.get('location') or len(entry['location']) < 6 or 'prime city' in entry['location'].lower()):
+                entry['location'] = matched['location']
+            entry['companion_matched'] = True
+
+            # Clear missing coordinate / availability review flags
+            r_flags = entry.get('review_flags', [])
+            new_flags = [f for f in r_flags if 'availability' not in f.lower() and 'coordinate' not in f.lower()]
+            entry['review_flags'] = new_flags
+            entry['review_needed'] = len(new_flags) > 0
+
+    return ppt_entries
+
+def generate_master_excel(entries, output_excel_path, manual_city=None, title="MEDIA BUZZ - SITES SPECIFICATION"):
+    """
+    Generates an authentic 11-column Master Excel workbook matching Jade Blue 16-10-2026.xlsx format.
+    Columns: SR NO, City, LOCATION, MEDIA, LIGHT, W, H, SQ FT, AVAILABLITY, Selling Amount, Latitude Longitude
+    Includes the official 7-point Media Buzz software Terms & Conditions.
+    """
+    if not HAS_OPENPYXL or not openpyxl:
+        return
+
+    try:
+        from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sites"
+
+        # Row 1: Executive Media Buzz Brand Header
+        ws.merge_cells('A1:K1')
+        title_cell = ws['A1']
+        title_cell.value = (title or "MEDIA BUZZ - SITES SPECIFICATION").upper()
+        title_cell.font = Font(name='Calibri', size=13, bold=True, color='1E293B')
+        title_cell.alignment = Alignment(horizontal='center', vertical='middle')
+        title_cell.fill = PatternFill(start_color='F1F5F9', end_color='F1F5F9', fill_type='solid')
+        ws.row_dimensions[1].height = 32
+
+        # Row 2: Headers matching Jade Blue 16-10-2026.xlsx in Bright Yellow
+        headers = [
+            'SR NO', 'City', 'LOCATION', 'MEDIA', 'LIGHT',
+            'W', 'H', 'SQ FT', 'AVAILABLITY', 'Selling Amount', 'Latitude Longitude'
+        ]
+        ws.append(headers)
+        ws.row_dimensions[2].height = 26
+
+        yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
+        header_font = Font(name='Calibri', size=11, bold=True, color='000000')
+        thin_border = Border(
+            left=Side(style='thin', color='C0C0C0'),
+            right=Side(style='thin', color='C0C0C0'),
+            top=Side(style='thin', color='C0C0C0'),
+            bottom=Side(style='medium', color='808080')
+        )
+
+        for col_idx in range(1, 12):
+            cell = ws.cell(row=2, column=col_idx)
+            cell.fill = yellow_fill
+            cell.font = header_font
+            cell.border = thin_border
+            align_h = 'center' if col_idx in [1, 2, 4, 5, 6, 7, 8, 9] else ('right' if col_idx == 10 else 'left')
+            cell.alignment = Alignment(horizontal=align_h, vertical='middle')
+
+        # Row 3+: Data rows
+        data_font = Font(name='Calibri', size=10.5)
+        data_border = Border(
+            left=Side(style='thin', color='E8E8E8'),
+            right=Side(style='thin', color='E8E8E8'),
+            top=Side(style='thin', color='E8E8E8'),
+            bottom=Side(style='thin', color='E8E8E8')
+        )
+
+        for idx, e in enumerate(entries, start=1):
+            r_num = idx + 2
+            # Parse dimensions
+            size_txt = str(e.get('size') or '').replace('ft', '').replace('FT', '').strip()
+            dim_m = re.match(r'(\d+(?:\.\d+)?)\s*[xX*×]\s*(\d+(?:\.\d+)?)', size_txt)
+            w_val = e.get('w') or (dim_m.group(1) if dim_m else "")
+            h_val = e.get('h') or (dim_m.group(2) if dim_m else "")
+            sqft_val = e.get('sq_ft') or ""
+            if not sqft_val and dim_m:
+                try:
+                    sqft_val = str(int(float(dim_m.group(1)) * float(dim_m.group(2))))
+                except Exception:
+                    sqft_val = ""
+
+            row_data = [
+                idx,
+                manual_city or e.get('city') or 'Ahmedabad',
+                e.get('location') or '',
+                e.get('type') or 'Hoarding',
+                e.get('illum') or 'BL',
+                w_val,
+                h_val,
+                sqft_val,
+                e.get('availability') or 'Available',
+                e.get('rate') or '',
+                e.get('coords') or ''
+            ]
+            ws.append(row_data)
+            ws.row_dimensions[r_num].height = 22
+            for col_idx in range(1, 12):
+                cell = ws.cell(row=r_num, column=col_idx)
+                cell.font = data_font
+                cell.border = data_border
+                align_h = 'center' if col_idx in [1, 2, 4, 5, 6, 7, 8, 9] else ('right' if col_idx == 10 else 'left')
+                cell.alignment = Alignment(horizontal=align_h, vertical='middle')
+
+        # Auto-adjust column widths
+        col_widths = {1: 8, 2: 16, 3: 45, 4: 15, 5: 10, 6: 8, 7: 8, 8: 12, 9: 20, 10: 20, 11: 28}
+        for col_idx, width in col_widths.items():
+            ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+        # Official 7-point Media Buzz software Terms & Conditions at bottom
+        terms_start = len(entries) + 5
+        ws.cell(row=terms_start, column=2, value="TERMS & CONDITIONS:").font = Font(name='Calibri', size=11, bold=True, color='1E293B')
+        for t_idx, term in enumerate(OFFICIAL_SOFTWARE_TERMS):
+            ws.cell(row=terms_start + 1 + t_idx, column=2, value=term).font = Font(name='Calibri', size=10, color='475569')
+
+        os.makedirs(os.path.dirname(os.path.abspath(output_excel_path)), exist_ok=True)
+        wb.save(output_excel_path)
+    except Exception as exc:
+        sys.stderr.write(f"[Master Excel Gen Error] {exc}\n")
 
 def generate_converted_pptx_pure(template_file, output_path, entries, is_excel=False):
     """Generates the master template presentation with cloned slides and official software Terms & Conditions."""
@@ -976,21 +1363,40 @@ def generate_converted_pptx_pure(template_file, output_path, entries, is_excel=F
             z_out.writestr(fname, data)
 
 
-def process_presentation_pure(input_path, output_path, template_file, mapping=None, sheet_name=None):
+def process_presentation_pure(input_path, output_path, template_file, mapping=None, sheet_name=None, companion_excel=None, manual_city=None, custom_name=None):
     """Processes conversion for PPTX or Excel using pure Python standard library & OpenXML."""
     is_excel = input_path.lower().endswith(('.xlsx', '.xls'))
     headers_detected = []
     mapping_used = {}
+    companion_merged = False
     
     if is_excel:
         entries, headers_detected, h_idx, mapping_used = extract_entries_from_excel(input_path, column_mapping=mapping, sheet_name=sheet_name)
     else:
         entries = extract_entries_pure_zip(input_path)
+        if companion_excel and os.path.isfile(companion_excel):
+            entries = merge_companion_excel(entries, companion_excel, column_mapping=mapping, sheet_name=sheet_name)
+            companion_merged = True
+
+    # Manual city override or fallback
+    if manual_city and str(manual_city).strip():
+        m_city = str(manual_city).strip()
+        for e in entries:
+            e['city'] = m_city
 
     if not entries:
         raise ValueError("Could not extract any location or billboard listings from the uploaded file.")
         
     generate_converted_pptx_pure(template_file, output_path, entries, is_excel=is_excel)
+
+    # Automatically generate standardized 11-column Master Excel workbook
+    excel_output_path = re.sub(r'\.pptx$', '.xlsx', output_path, flags=re.IGNORECASE)
+    excel_generated = False
+    try:
+        generate_master_excel(entries, excel_output_path, manual_city=manual_city, title=custom_name or "MEDIA BUZZ - SITES SPECIFICATION")
+        excel_generated = os.path.isfile(excel_output_path)
+    except Exception as xErr:
+        sys.stderr.write(f"[Excel Generation Notice] {xErr}\n")
     
     slide_previews = []
     for idx, entry in enumerate(entries):
@@ -1023,6 +1429,7 @@ def process_presentation_pure(input_path, output_path, template_file, mapping=No
             'hasPhoto': entry.get('photo_bytes') is not None,
             'reviewNeeded': entry.get('review_needed', False),
             'reviewFlags': entry.get('review_flags', []),
+            'companionMatched': entry.get('companion_matched', False),
             'previewUrl': thumb_data
         })
 
@@ -1050,6 +1457,10 @@ def process_presentation_pure(input_path, output_path, template_file, mapping=No
     return {
         'success': True,
         'isExcel': is_excel,
+        'companionMerged': companion_merged,
+        'manualCityApplied': bool(manual_city and str(manual_city).strip()),
+        'manualCity': manual_city or None,
+        'excelGenerated': excel_generated,
         'softwareTermsVerified': True,
         'message': 'Successfully converted into Media Buzz Master Template format.',
         'processedSlides': len(entries),
@@ -1332,7 +1743,7 @@ def process_presentation_pptx(input_path, output_path, template_file):
         'slides': slide_previews
     }
 
-def process_presentation(input_path, output_path, master_template_path=None, mapping=None, sheet_name=None):
+def process_presentation(input_path, output_path, master_template_path=None, mapping=None, sheet_name=None, companion_excel=None, manual_city=None, custom_name=None):
     """
     Main conversion entrypoint.
     Executes zero-dependency OpenXML engine ensuring 100% valid PowerPoint files.
@@ -1345,7 +1756,12 @@ def process_presentation(input_path, output_path, master_template_path=None, map
     if not os.path.isfile(input_path):
         raise FileNotFoundError(f"Input file not found at: {input_path}")
         
-    return process_presentation_pure(input_path, output_path, template_file, mapping=mapping, sheet_name=sheet_name)
+    return process_presentation_pure(
+        input_path, output_path, template_file,
+        mapping=mapping, sheet_name=sheet_name,
+        companion_excel=companion_excel, manual_city=manual_city,
+        custom_name=custom_name
+    )
 
 
 def main():
@@ -1357,6 +1773,9 @@ def main():
     parser.add_argument('--template', type=str, help="Path to master template")
     parser.add_argument('--mapping', type=str, help="JSON-encoded custom column mapping")
     parser.add_argument('--sheet', type=str, help="Target worksheet name for Excel conversion")
+    parser.add_argument('--companion-excel', type=str, help="Optional companion Excel workbook to extract availability, coordinates, rates, etc.")
+    parser.add_argument('--manual-city', type=str, help="Manual city override or default city")
+    parser.add_argument('--custom-name', type=str, help="Custom name for output presentation and Excel")
     args = parser.parse_args()
     
     if args.check_template:
@@ -1398,7 +1817,16 @@ def main():
             sys.stderr.write(f"[PPT Engine] Notice parsing mapping: {mErr}\n")
         
     try:
-        res = process_presentation(args.input, args.output, args.template, mapping=col_mapping, sheet_name=args.sheet)
+        res = process_presentation(
+            args.input,
+            args.output,
+            args.template,
+            mapping=col_mapping,
+            sheet_name=args.sheet,
+            companion_excel=args.companion_excel,
+            manual_city=args.manual_city,
+            custom_name=args.custom_name
+        )
         # Write full result file to disk to prevent stdout buffer overflow
         result_json_path = args.output + '.json'
         try:
