@@ -897,7 +897,7 @@ app.post('/api/ppt-converter/convert', auth, upload.single('file'), (req, res) =
     return res.status(400).json({ message: 'Only .pptx files are supported for conversion.' });
   }
 
-  const downloadId = `Converted_Testing_Format-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pptx`;
+  const downloadId = `Converted_MediaBuzz_Master_Format-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pptx`;
   const outputPath = path.join(convertedDir, downloadId);
   const engineScript = path.join(__dirname, 'ppt_converter_engine.py');
 
@@ -916,7 +916,7 @@ app.post('/api/ppt-converter/convert', auth, upload.single('file'), (req, res) =
         return res.status(400).json({ message: result.error || 'Conversion process failed.' });
       }
       result.downloadId = downloadId;
-      result.downloadName = 'Converted_Testing_Format.pptx';
+      result.downloadName = 'Converted_MediaBuzz_Master_Format.pptx';
       res.json(result);
     } catch (parseErr) {
       res.status(500).json({ message: 'Failed to parse engine output: ' + parseErr.message });
@@ -933,17 +933,20 @@ app.get('/api/ppt-converter/download/:downloadId', auth, (req, res) => {
   if (!fs.existsSync(filePath)) {
     return res.status(404).send('Converted file expired or not found.');
   }
-  res.setHeader('Content-Disposition', 'attachment; filename="Converted_Testing_Format.pptx"');
+  res.setHeader('Content-Disposition', 'attachment; filename="Converted_MediaBuzz_Master_Format.pptx"');
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
   res.sendFile(filePath);
 });
 
 app.get('/api/ppt-converter/template/download', auth, (req, res) => {
-  const templatePath = path.join(templatesDir, 'Testing 24-10-2026.pptx');
+  let templatePath = path.join(templatesDir, 'MediaBuzz_Master_Template.pptx');
+  if (!fs.existsSync(templatePath)) {
+    templatePath = path.join(templatesDir, 'Testing 24-10-2026.pptx');
+  }
   if (!fs.existsSync(templatePath)) {
     return res.status(404).json({ message: 'Master template file not found on server.' });
   }
-  res.setHeader('Content-Disposition', 'attachment; filename="Testing 24-10-2026.pptx"');
+  res.setHeader('Content-Disposition', 'attachment; filename="MediaBuzz_Master_Template.pptx"');
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
   res.sendFile(templatePath);
 });
@@ -956,11 +959,13 @@ app.post('/api/ppt-converter/template', auth, managerOrAdmin, upload.single('fil
     try { fs.unlinkSync(req.file.path); } catch (_) {}
     return res.status(400).json({ message: 'Master template must be a .pptx file.' });
   }
-  const destPath = path.join(templatesDir, 'Testing 24-10-2026.pptx');
+  const destPath1 = path.join(templatesDir, 'MediaBuzz_Master_Template.pptx');
+  const destPath2 = path.join(templatesDir, 'Testing 24-10-2026.pptx');
   try {
-    fs.copyFileSync(req.file.path, destPath);
+    fs.copyFileSync(req.file.path, destPath1);
+    fs.copyFileSync(req.file.path, destPath2);
     try { fs.unlinkSync(req.file.path); } catch (_) {}
-    res.json({ success: true, message: 'Master template updated successfully.', size: fs.statSync(destPath).size });
+    res.json({ success: true, message: 'Master template updated successfully.', size: fs.statSync(destPath1).size });
   } catch (err) {
     res.status(500).json({ message: 'Failed to update template: ' + err.message });
   }

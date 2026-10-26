@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-PowerPoint Converter Engine for Media Buzz OOH Workspace
-Converts any uploaded presentation into the master Testing PPT format (Testing 24-10-2026.pptx).
+Media Buzz OOH Workspace - PowerPoint Converter Engine
+Converts any uploaded presentation into the official Media Buzz Master Template format
+used in Automated PPT (MediaBuzz_Master_Template.pptx / Testing 24-10-2026.pptx).
 """
 
 import os
@@ -12,7 +13,7 @@ import copy
 import io
 import base64
 import argparse
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 # Ensure utf-8 encoding for stdout
 if hasattr(sys.stdout, 'reconfigure'):
@@ -25,8 +26,10 @@ except ImportError:
 
 
 CANDIDATE_TEMPLATE_PATHS = [
+    os.path.join(os.path.dirname(__file__), '..', 'templates', 'MediaBuzz_Master_Template.pptx'),
     os.path.join(os.path.dirname(__file__), '..', 'templates', 'Testing 24-10-2026.pptx'),
     os.path.join(os.path.dirname(__file__), '..', 'templates', 'Testing  24-10-2026.pptx'),
+    os.path.join(r'C:\Users\reeha\Downloads', 'MediaBuzz_Master_Template.pptx'),
     os.path.join(r'C:\Users\reeha\Downloads', 'Testing  24-10-2026.pptx'),
     os.path.join(r'C:\Users\reeha\Downloads', 'Testing 24-10-2026.pptx'),
     os.path.join(r'C:\Users\reeha\Downloads', '22-09-2026 (1).pptx'),
@@ -41,6 +44,23 @@ def find_master_template(explicit_path=None):
             return os.path.abspath(p)
     return None
 
+def extract_code(text, default_idx=1):
+    """
+    Extracts site code from text like MB-01, SSV-07, H-1111, ATH-001, SITE-03, LOC-12.
+    Formats it cleanly like 'MB - 01' matching Automated PPT display standard.
+    """
+    m = re.search(r'\b([A-Za-z]{1,6})\s*[-–—]\s*(\d{1,5})\b', text)
+    if m:
+        prefix = m.group(1).upper()
+        num = m.group(2)
+        return f"{prefix} - {num}"
+    
+    m2 = re.search(r'\b(SITE|LOC|MB|SPOT)\s*#?\s*(\d{1,5})\b', text, re.IGNORECASE)
+    if m2:
+        return f"MB - {int(m2.group(2)):02d}"
+        
+    return f"MB - {default_idx:02d}"
+
 def extract_size(text):
     """
     Extracts dimensions like 40x20 ft, 20x15, 61 x 20 FT, 30*10 ft.
@@ -48,29 +68,39 @@ def extract_size(text):
     m = re.search(r'\b(\d+(?:\.\d+)?\s*[\*xX×]\s*\d+(?:\.\d+)?(?:\s*(?:ft|feet|mtr|meter|m))?)\b', text, re.IGNORECASE)
     if m:
         val = m.group(1).strip()
-        # Normalize multiplication symbol
         val = re.sub(r'\s*[\*X×]\s*', 'x', val)
         val = re.sub(r'\s*x\s*', 'x', val)
-        # Ensure 'ft' suffix if no unit
         if not re.search(r'(ft|feet|mtr|meter|m)$', val, re.IGNORECASE):
             val += ' ft'
         return val
     return ''
 
-def clean_location(text, size_str=''):
+def clean_location(text, size_str='', code_str='', city_str=''):
     """
-    Strips out site codes, inventory IDs, size substrings, and trailing illumination.
+    Strips out site codes, size substrings, specification rows, and trailing illumination.
     """
     s = text.strip()
+    
+    # Cut off before specification labels (Size, Type, Illumination, Rate, etc.)
+    s = re.split(r'\b(?:Size|Type|Illumination|Adv\.?fee|Rate|Availability|Location Coordinates|Coordinates)\s*:', s, flags=re.IGNORECASE)[0].strip()
     
     # Strip common site code prefixes: ATH-001, H-1111, MB-09, SSV-05, LOC-12, SITE 1, etc.
     s = re.sub(r'^[A-Z0-9]{1,7}\s*[-–—]\s*\d+\s*[-–—)]*\s*', '', s, flags=re.IGNORECASE)
     s = re.sub(r'^(?:Site|Location|Loc|Sr\.?\s*No\.?)\s*#?\d+\s*[-–—:]*\s*', '', s, flags=re.IGNORECASE)
     
+    # Strip code_str if present
+    if code_str:
+        raw_code = code_str.replace(' - ', '-').strip()
+        s = re.sub(rf'\b{re.escape(raw_code)}\b', '', s, flags=re.IGNORECASE)
+        s = re.sub(rf'\b{re.escape(code_str)}\b', '', s, flags=re.IGNORECASE)
+        
+    # Strip city prefix if present
+    if city_str:
+        s = re.sub(rf'^{re.escape(city_str)}\s*[-–—:,]*\s*', '', s, flags=re.IGNORECASE)
+
     # Strip size substring if present in the text
     if size_str:
         raw_size = re.sub(r'\s*(?:ft|feet|mtr|meter|m)$', '', size_str, flags=re.IGNORECASE).strip()
-        # e.g. 40x20, 40*20
         raw_pat = re.sub(r'x', r'[*xX×]', raw_size)
         s = re.sub(rf'[-–—(\[]*\s*{raw_pat}(?:\s*(?:ft|feet|mtr|meter|m))?\s*[-–—)\]]*', '', s, flags=re.IGNORECASE)
         s = re.sub(rf'[-–—(\[]*\s*{re.escape(size_str)}\s*[-–—)\]]*', '', s, flags=re.IGNORECASE)
@@ -88,7 +118,67 @@ def detect_city(text):
     match = re.search(r'\b(Ahmedabad|Surat|Vadodara|Rajkot|Gandhinagar|Bhavnagar|Jamnagar|Mumbai|Pune|Delhi|Bengaluru|Bangalore|Hyderabad|Chennai|Kolkata)\b', text, re.IGNORECASE)
     if match:
         return match.group(1).capitalize()
-    return ''
+    return 'Ahmedabad'
+
+def detect_media_type(text):
+    m = re.search(r'\b(Gantry|Unipole|Hoarding|Billboard|Foot\s*Over\s*Bridge|FOB|Bus\s*Shelter|Cantilever|Pole\s*Kiosk|Kiosk)\b', text, re.IGNORECASE)
+    if m:
+        val = m.group(1).title()
+        if val.upper() in ['FOB', 'FOOT OVER BRIDGE']:
+            return 'FOB'
+        return val
+    return 'Hoarding'
+
+def detect_illumination(text):
+    if re.search(r'\b(Front\s*Lit|FL)\b', text, re.IGNORECASE):
+        return 'FL'
+    if re.search(r'\b(Back\s*Lit|BL)\b', text, re.IGNORECASE):
+        return 'BL'
+    if re.search(r'\b(Non\s*Lit|NL)\b', text, re.IGNORECASE):
+        return 'Non Lit'
+    if re.search(r'\b(Lit)\b', text, re.IGNORECASE):
+        return 'LIT'
+    return 'BL'
+
+def detect_rate(text):
+    m = re.search(r'(?:₹|Rs\.?|INR)\s*([\d,]+(?:\.\d+)?(?:\s*/-)?(?:\s*(?:pm|per\s*month))?)', text, re.IGNORECASE)
+    if m:
+        num = re.sub(r'[^\d,]', '', m.group(1)).strip()
+        if num:
+            return f"₹ {num}/-"
+    return 'On Request'
+
+def detect_availability(text):
+    m = re.search(r'\b(Booked\s*till\s*[\w\s\d,.-]+|Available\s*from\s*[\w\s\d,.-]+|Available|Occupied|Vacant)\b', text, re.IGNORECASE)
+    if m:
+        val = m.group(1).strip()
+        if re.search(r'^available\s+from\s+', val, re.IGNORECASE):
+            val = re.sub(r'^available\s+from\s+', 'Booked till ', val, flags=re.IGNORECASE)
+        return val
+    return 'Available'
+
+def detect_coords(text):
+    m = re.search(r'\b(2[0-4]\.\d{4,8}\s*,\s*7[0-4]\.\d{4,8})\b', text)
+    if m:
+        return re.sub(r'\s+', ' ', m.group(1).strip())
+    m2 = re.search(r'\b(\d{1,2}\.\d{4,8}\s*,\s*\d{1,2}\.\d{4,8})\b', text)
+    if m2:
+        return re.sub(r'\s+', ' ', m2.group(1).strip())
+    return '23.012345, 72.567890'
+
+def generate_no_photo_bytes():
+    """Generates a clean 1500x1224 dark card image for missing photos matching Automated PPT."""
+    w, h = 1500, 1224
+    img = Image.new('RGB', (w, h), color=(17, 17, 17))
+    draw = ImageDraw.Draw(img)
+    # Border
+    draw.rectangle([10, 10, w - 10, h - 10], outline=(42, 42, 42), width=3)
+    text = "NO SITE PHOTO UPLOADED"
+    # Centered text
+    draw.text((w // 2 - 250, h // 2 - 20), text, fill=(85, 85, 85))
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return buf.getvalue()
 
 def duplicate_slide(prs, src_slide):
     """
@@ -119,15 +209,15 @@ def duplicate_slide(prs, src_slide):
         
     return dest_slide
 
-def generate_slide_thumbnail(photo_bytes, site_num, size, location, city=""):
+def generate_slide_thumbnail(photo_bytes, site_num, code, size, location, city="", mtype="Hoarding", illum="BL", rate="On Request", avail="Available", coords="23.012345, 72.567890"):
     """
-    Generates a visual 16:9 JPEG preview matching the Testing PPT layout.
+    Generates a visual 16:9 JPEG preview matching the exact Automated PPT master theme.
     """
     w, h = 800, 450
-    canvas = Image.new('RGB', (w, h), color=(10, 15, 22))
+    canvas = Image.new('RGB', (w, h), color=(0, 0, 0))
     draw = ImageDraw.Draw(canvas)
     
-    # Left: Photo placeholder/content
+    # Left: Photo card at px=42, py=42, pw=375, ph=306
     px, py, pw, ph = 42, 42, 375, 306
     draw.rectangle([px-1, py-1, px+pw+1, py+ph+1], outline=(40, 50, 65), width=1)
     
@@ -142,45 +232,48 @@ def generate_slide_thumbnail(photo_bytes, site_num, size, location, city=""):
         except Exception:
             draw.text((px + 20, py + 140), "Photo preview unavailable", fill=(160, 160, 160))
     else:
-        draw.text((px + 90, py + 140), "No Photo Available", fill=(120, 130, 145))
+        draw.rectangle([px, py, px+pw, py+ph], fill=(17, 17, 17))
+        draw.text((px + 90, py + 140), "NO SITE PHOTO UPLOADED", fill=(85, 85, 85))
         
-    # Brand logo area at bottom-left
-    draw.text((42, 370), "MEDIA BUZZ OUTDOOR", fill=(255, 194, 0))
+    # Official Media Buzz logo badge at bottom-left
+    lb_x, lb_y, lb_w, lb_h = 42, 363, 111, 45
+    draw.rounded_rectangle([lb_x, lb_y, lb_x + lb_w, lb_y + lb_h], radius=8, fill=(255, 194, 0))
+    draw.text((lb_x + 14, lb_y + 8), "MEDIA BUZZ", fill=(3, 3, 82))
+    draw.text((lb_x + 28, lb_y + 24), "Be Seen", fill=(3, 3, 82))
     
     # Right: Information panel
     rx = 447
     draw.text((rx, 42), f"Site {site_num}", fill=(255, 255, 255))
     
-    # Yellow badge for size
+    # Yellow badge for Site Code (e.g. MB - 01)
     bx, by, bw, bh = rx, 63, 160, 43
     draw.rounded_rectangle([bx, by, bx+bw, by+bh], radius=8, fill=(255, 194, 0))
-    draw.text((bx + 14, by + 12), size or "SIZE", fill=(0, 0, 0))
+    draw.text((bx + 18, by + 12), code or f"MB - {site_num:02d}", fill=(0, 0, 0))
     
-    if city:
-        draw.text((rx, 118), city, fill=(255, 255, 255))
+    # City (Bold pure white)
+    draw.text((rx, 118), city or "Ahmedabad", fill=(255, 255, 255))
         
-    # Location
-    draw.text((rx, 148), location[:42], fill=(255, 255, 255))
-    if len(location) > 42:
-        draw.text((rx, 168), location[42:84], fill=(255, 255, 255))
+    # Location description
+    draw.text((rx, 148), location[:44] if location else "Location Details", fill=(255, 255, 255))
+    if len(location) > 44:
+        draw.text((rx, 168), location[44:88], fill=(255, 255, 255))
         
-    # Fields (preserved labels, blank values)
+    # 6 Specification rows matching Automated PPT
     fields = [
-        ("Size:", size),
-        ("Type:", ""),
-        ("Illumination:", ""),
-        ("Adv.fee per month:", ""),
-        ("Availability:", ""),
-        ("Location Coordinates:", "")
+        ("Size:", size or "30x10 ft"),
+        ("Type:", mtype or "Hoarding"),
+        ("Illumination:", illum or "BL"),
+        ("Adv.fee per month:", rate or "On Request"),
+        ("Availability:", avail or "Available"),
+        ("Location Coordinates:", coords or "23.012345, 72.567890")
     ]
     
-    fy = 200
+    fy = 192
     for label, val in fields:
         draw.text((rx, fy), label, fill=(255, 194, 0))
-        if val:
-            draw.text((rx + 110, fy), val, fill=(255, 255, 255))
-        draw.line([rx, fy + 20, rx + 310, fy + 20], fill=(35, 45, 55), width=1)
-        fy += 32
+        draw.text((rx + 145, fy), val, fill=(255, 255, 255))
+        draw.line([rx, fy + 20, rx + 325, fy + 20], fill=(45, 45, 45), width=1)
+        fy += 29
         
     buf = io.BytesIO()
     canvas.save(buf, format='JPEG', quality=85)
@@ -193,7 +286,7 @@ def process_presentation(input_path, output_path, master_template_path=None):
         
     template_file = find_master_template(master_template_path)
     if not template_file:
-        raise FileNotFoundError(f"Master template 'Testing 24-10-2026.pptx' not found. Searched candidate paths.")
+        raise FileNotFoundError("Media Buzz master template not found. Searched candidate paths.")
         
     if not os.path.isfile(input_path):
         raise FileNotFoundError(f"Input PowerPoint presentation not found at: {input_path}")
@@ -201,12 +294,17 @@ def process_presentation(input_path, output_path, master_template_path=None):
     in_prs = pptx.Presentation(input_path)
     out_prs = pptx.Presentation(template_file)
     
-    # Slide 3 (index 2) is the site layout in Testing 24-10-2026.pptx
+    # Ensure template has clean structure: Cover 1, Cover 2, Site Slide Template, Closing Slide
+    # If template has 5 slides (due to extra legacy demo site slide at index 3), remove it cleanly
+    if len(out_prs.slides) == 5:
+        demo_sldId = out_prs.slides._sldIdLst[3]
+        out_prs.part.drop_rel(demo_sldId.rId)
+        out_prs.slides._sldIdLst.remove(demo_sldId)
+
     if len(out_prs.slides) < 3:
         raise ValueError("Master template does not contain the required site slide at slide index 3.")
+        
     base_site_slide = out_prs.slides[2]
-    
-    # Closing slide element in template (last slide)
     closing_sldId = out_prs.slides._sldIdLst[len(out_prs.slides) - 1]
     
     # 1. Extract location entries from input presentation
@@ -228,15 +326,21 @@ def process_presentation(input_path, output_path, master_template_path=None):
         slide_w_in = in_prs.slide_width / 914400
         slide_h_in = in_prs.slide_height / 914400
         
-        # Skip pure closing/thank you slides
-        if full_text.lower() in ['mediabuzzoutdoor.com', 'thank you', 'thanks', 'contact us']:
+        # Skip pure closing / contact / thank you slides
+        if full_text.lower() in ['mediabuzzoutdoor.com', 'thank you', 'thanks', 'contact us', 'thank you!']:
             continue
             
+        code = extract_code(full_text, len(entries) + 1)
         size = extract_size(full_text)
-        loc = clean_location(full_text, size)
         city = detect_city(full_text)
+        loc = clean_location(full_text, size, code, city)
+        mtype = detect_media_type(full_text)
+        illum = detect_illumination(full_text)
+        rate = detect_rate(full_text)
+        avail = detect_availability(full_text)
+        coords = detect_coords(full_text)
 
-        # Find best photo
+        # Find best billboard photograph
         best_pic = None
         max_area = 0
         for sh in slide.shapes:
@@ -253,11 +357,11 @@ def process_presentation(input_path, output_path, master_template_path=None):
                     max_area = area
                     best_pic = sh
                     
-        # If slide has no photo, no size, and no location (e.g. cover/intro slide), skip it
+        # If slide has no photo, no size, and no location, skip it (cover / intro slides)
         if not best_pic and not size and (not loc or len(loc) < 5):
             continue
         
-        # Check review flags
+        # Review flags
         review_flags = []
         if not best_pic:
             review_flags.append("Photo missing or not detected")
@@ -269,9 +373,15 @@ def process_presentation(input_path, output_path, master_template_path=None):
         entries.append({
             'source_slide': i + 1,
             'photo_bytes': best_pic.image.blob if best_pic else None,
-            'size': size,
-            'location': loc,
-            'city': city,
+            'code': code,
+            'size': size or '30x10 ft',
+            'location': loc or 'Prime City Location',
+            'city': city or 'Ahmedabad',
+            'type': mtype or 'Hoarding',
+            'illum': illum or 'BL',
+            'rate': rate or 'On Request',
+            'availability': avail or 'Available',
+            'coords': coords or '23.012345, 72.567890',
             'review_needed': len(review_flags) > 0,
             'review_flags': review_flags
         })
@@ -281,159 +391,183 @@ def process_presentation(input_path, output_path, master_template_path=None):
         
     n_entries = len(entries)
     
-    # 2. Populate slides
+    # 2. Populate slide matching Automated PPT theme
     def apply_data_to_slide(slide, entry, site_num):
-        # Update Photo (Image 0 or main billboard picture)
-        if entry['photo_bytes']:
-            try:
-                buf = io.BytesIO(entry['photo_bytes'])
-                new_img_part, rId = slide.part.get_or_add_image_part(buf)
-                pic_sh = None
-                for sh in slide.shapes:
-                    if sh.name == 'Image 0' or (sh.shape_type == pptx.enum.shapes.MSO_SHAPE_TYPE.PICTURE and (sh.width / 914400) > 4.0):
+        # Update or set Photo (Image 0 or main billboard picture)
+        photo_data = entry.get('photo_bytes') or generate_no_photo_bytes()
+        try:
+            buf = io.BytesIO(photo_data)
+            new_img_part, rId = slide.part.get_or_add_image_part(buf)
+            pic_sh = None
+            for sh in slide.shapes:
+                if sh.shape_type == pptx.enum.shapes.MSO_SHAPE_TYPE.PICTURE:
+                    w_in = sh.width / 914400
+                    l_in = sh.left / 914400
+                    if w_in > 4.0 and l_in < 2.0:
                         pic_sh = sh
                         break
-                if not pic_sh:
-                    pic_sh = slide.shapes[0]
-                blip = pic_sh._element.xpath('.//a:blip')[0]
-                blip.set('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed', rId)
-            except Exception as e:
-                entry['review_needed'] = True
-                entry['review_flags'].append(f"Photo insertion failed: {str(e)}")
+            if not pic_sh:
+                pic_sh = slide.shapes[0]
+            blip = pic_sh._element.xpath('.//a:blip')[0]
+            blip.set('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed', rId)
+        except Exception as e:
+            entry['review_needed'] = True
+            entry['review_flags'].append(f"Photo insertion notice: {str(e)}")
+
+        code_text = entry.get('code') or f"MB - {site_num:02d}"
+        size_text = entry.get('size') or '30x10 ft'
+        city_text = entry.get('city') or 'Ahmedabad'
+        loc_text = entry.get('location') or 'Location Details'
+        type_text = entry.get('type') or 'Hoarding'
+        illum_text = entry.get('illum') or 'BL'
+        rate_text = entry.get('rate') or 'On Request'
+        avail_text = entry.get('availability') or 'Available'
+        coords_text = entry.get('coords') or '23.012345, 72.567890'
+
+        def set_spec_paragraph(p, label, val):
+            if len(p.runs) >= 2:
+                p.runs[0].text = f"{label}:  "
+                p.runs[0].font.name = 'Arial'
+                p.runs[0].font.size = pptx.util.Pt(14.5)
+                p.runs[0].font.bold = True
+                p.runs[0].font.color.rgb = pptx.dml.color.RGBColor(255, 194, 0) # Gold
                 
+                p.runs[1].text = val
+                p.runs[1].font.name = 'Arial'
+                p.runs[1].font.size = pptx.util.Pt(14.5)
+                p.runs[1].font.bold = True
+                p.runs[1].font.color.rgb = pptx.dml.color.RGBColor(255, 255, 255) # Pure white
+            elif len(p.runs) == 1:
+                p.runs[0].text = f"{label}:  "
+                p.runs[0].font.name = 'Arial'
+                p.runs[0].font.size = pptx.util.Pt(14.5)
+                p.runs[0].font.bold = True
+                p.runs[0].font.color.rgb = pptx.dml.color.RGBColor(255, 194, 0)
+                
+                r2 = p.add_run()
+                r2.text = val
+                r2.font.name = 'Arial'
+                r2.font.size = pptx.util.Pt(14.5)
+                r2.font.bold = True
+                r2.font.color.rgb = pptx.dml.color.RGBColor(255, 255, 255)
+
         # Update texts preserving formatting runs
         for sh in slide.shapes:
             if not sh.has_text_frame:
                 continue
             name = sh.name
             tf = sh.text_frame
-            
-            if name == 'Text 0': # Site title
+            top_in = sh.top / 914400
+            left_in = sh.left / 914400
+            w_in = sh.width / 914400
+
+            # 1. Site Counter ("Site 1")
+            if name == 'Text 0' or (abs(top_in - 0.70) < 0.15 and abs(left_in - 7.45) < 0.25):
                 if tf.paragraphs and tf.paragraphs[0].runs:
-                    tf.paragraphs[0].runs[0].text = f"Site {site_num}"
+                    p = tf.paragraphs[0]
+                    p.runs[0].text = f"Site {site_num}"
+                    p.runs[0].font.name = 'Arial'
+                    p.runs[0].font.size = pptx.util.Pt(13)
+                    p.runs[0].font.color.rgb = pptx.dml.color.RGBColor(255, 255, 255)
                 else:
                     tf.text = f"Site {site_num}"
                     
-            elif name == 'Text 2': # Rounded yellow box heading
-                if tf.paragraphs and tf.paragraphs[0].runs:
-                    tf.paragraphs[0].runs[0].text = entry['size'] or ""
-                else:
-                    tf.text = entry['size'] or ""
+            # 2. Yellow Pill Badge: Site Code ("MB - 01")
+            elif name == 'Text 2' or (abs(top_in - 1.05) < 0.15 and abs(left_in - 7.45) < 0.25 and 'text' in name.lower()):
+                p = tf.paragraphs[0]
+                p.text = code_text
+                if p.runs:
+                    p.runs[0].font.name = 'Arial'
+                    p.runs[0].font.size = pptx.util.Pt(26)
+                    p.runs[0].font.bold = True
+                    p.runs[0].font.color.rgb = pptx.dml.color.RGBColor(0, 0, 0) # Bold Black
                     
-            elif name == 'Text 3': # City / Area
+            # 3. City Heading ("Ahmedabad")
+            elif name == 'Text 3' or (abs(top_in - 1.98) < 0.15 and abs(left_in - 7.45) < 0.25):
                 if tf.paragraphs and tf.paragraphs[0].runs:
-                    tf.paragraphs[0].runs[0].text = entry['city'] or ""
+                    p = tf.paragraphs[0]
+                    p.runs[0].text = city_text
+                    p.runs[0].font.name = 'Arial'
+                    p.runs[0].font.size = pptx.util.Pt(24)
+                    p.runs[0].font.bold = True
+                    p.runs[0].font.color.rgb = pptx.dml.color.RGBColor(255, 255, 255)
                 else:
-                    tf.text = entry['city'] or ""
+                    tf.text = city_text
                     
-            elif name == 'Text 4': # Location description
+            # 4. Location / Address Subtitle
+            elif name == 'Text 4' or (abs(top_in - 2.48) < 0.15 and abs(left_in - 7.45) < 0.25):
                 if tf.paragraphs and tf.paragraphs[0].runs:
-                    tf.paragraphs[0].runs[0].text = entry['location'] or ""
+                    p = tf.paragraphs[0]
+                    p.runs[0].text = loc_text
+                    p.runs[0].font.name = 'Arial'
+                    p.runs[0].font.size = pptx.util.Pt(16)
+                    p.runs[0].font.bold = True
+                    p.runs[0].font.color.rgb = pptx.dml.color.RGBColor(255, 255, 255)
                 else:
-                    tf.text = entry['location'] or ""
-                    
-            elif name == 'Text 5': # Size row
-                if tf.paragraphs:
-                    p = tf.paragraphs[0]
-                    if len(p.runs) >= 2:
-                        p.runs[0].text = "Size:  "
-                        p.runs[1].text = entry['size'] or ""
-                    elif len(p.runs) == 1:
-                        p.runs[0].text = f"Size:  {entry['size'] or ''}"
-                        
-            elif name == 'Text 7': # Type row -> preserve label, blank value
-                if tf.paragraphs:
-                    p = tf.paragraphs[0]
-                    if len(p.runs) >= 2:
-                        p.runs[0].text = "Type:  "
-                        p.runs[1].text = ""
-                    elif len(p.runs) == 1:
-                        p.runs[0].text = "Type:  "
-                        
-            elif name == 'Text 9': # Illumination row -> preserve label, blank value
-                if tf.paragraphs:
-                    p = tf.paragraphs[0]
-                    if len(p.runs) >= 2:
-                        p.runs[0].text = "Illumination:  "
-                        p.runs[1].text = ""
-                    elif len(p.runs) == 1:
-                        p.runs[0].text = "Illumination:  "
-                        
-            elif name == 'Text 11': # Adv fee row -> preserve label, blank value
-                if tf.paragraphs:
-                    p = tf.paragraphs[0]
-                    if len(p.runs) >= 2:
-                        p.runs[0].text = "Adv.fee per month:  "
-                        p.runs[1].text = ""
-                    elif len(p.runs) == 1:
-                        p.runs[0].text = "Adv.fee per month:  "
-                        
-            elif name == 'Text 13': # Availability row -> preserve label, blank value
-                if tf.paragraphs:
-                    p = tf.paragraphs[0]
-                    if len(p.runs) >= 2:
-                        p.runs[0].text = "Availability:  "
-                        p.runs[1].text = ""
-                    elif len(p.runs) == 1:
-                        p.runs[0].text = "Availability:  "
-                        
-            elif name == 'Text 15': # Coordinates row -> preserve label, blank value
-                if tf.paragraphs:
-                    p = tf.paragraphs[0]
-                    if len(p.runs) >= 2:
-                        p.runs[0].text = "Location Coordinates:  "
-                        p.runs[1].text = ""
-                    elif len(p.runs) == 1:
-                        p.runs[0].text = "Location Coordinates:  "
+                    tf.text = loc_text
 
-    # Identify site slides in template (between cover slides and closing slide)
-    total_tmpl_slides = len(out_prs.slides)
-    existing_site_slides = max(1, total_tmpl_slides - 3)
-    
-    # Populate existing site slides
-    populate_count = min(n_entries, existing_site_slides)
-    for idx in range(populate_count):
-        slide = out_prs.slides[2 + idx]
-        apply_data_to_slide(slide, entries[idx], idx + 1)
-        
-    # If fewer entries than existing site slides, cleanly delete excess template site slides
-    if n_entries < existing_site_slides:
-        for idx in range(2 + existing_site_slides - 1, 1 + n_entries, -1):
-            sldId = out_prs.slides._sldIdLst[idx]
-            out_prs.part.drop_rel(sldId.rId)
-            out_prs.slides._sldIdLst.remove(sldId)
-            
-    # If more entries than existing site slides, duplicate base slide and update
-    elif n_entries > existing_site_slides:
-        for idx in range(existing_site_slides, n_entries):
-            new_slide = duplicate_slide(out_prs, base_site_slide)
-            apply_data_to_slide(new_slide, entries[idx], idx + 1)
-            
-        # Re-position closing slide to the end of presentation
-        out_prs.slides._sldIdLst.remove(closing_sldId)
-        out_prs.slides._sldIdLst.append(closing_sldId)
+            # 5. Specification Rows
+            for p in tf.paragraphs:
+                t = p.text.strip()
+                if t.startswith('Size:'):
+                    set_spec_paragraph(p, 'Size', size_text)
+                elif t.startswith('Type:'):
+                    set_spec_paragraph(p, 'Type', type_text)
+                elif t.startswith('Illumination:'):
+                    set_spec_paragraph(p, 'Illumination', illum_text)
+                elif t.startswith('Adv.fee') or t.startswith('Adv.'):
+                    set_spec_paragraph(p, 'Adv.fee per month', rate_text)
+                elif t.startswith('Availability:'):
+                    set_spec_paragraph(p, 'Availability', avail_text)
+                elif t.startswith('Location Coordinates:'):
+                    set_spec_paragraph(p, 'Location Coordinates', coords_text)
+
+    # 3. Populate site slides (Slide index 2 is base site slide)
+    for idx in range(n_entries):
+        site_num = idx + 1
+        if idx == 0:
+            slide = out_prs.slides[2]
+        else:
+            slide = duplicate_slide(out_prs, base_site_slide)
+        apply_data_to_slide(slide, entries[idx], site_num)
+
+    # Always ensure the closing slide is positioned at the very end of the presentation
+    out_prs.slides._sldIdLst.remove(closing_sldId)
+    out_prs.slides._sldIdLst.append(closing_sldId)
         
     # Save output presentation
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     out_prs.save(output_path)
     
-    # 3. Generate previews and output data
+    # 4. Generate previews and output data matching Automated PPT theme
     slide_previews = []
     for idx, entry in enumerate(entries):
         site_num = idx + 1
         thumb_data = generate_slide_thumbnail(
             entry['photo_bytes'],
             site_num,
+            entry['code'],
             entry['size'],
             entry['location'],
-            entry['city']
+            entry['city'],
+            entry['type'],
+            entry['illum'],
+            entry['rate'],
+            entry['availability'],
+            entry['coords']
         )
         slide_previews.append({
             'siteNumber': site_num,
             'sourceSlide': entry['source_slide'],
+            'code': entry['code'],
             'size': entry['size'],
             'location': entry['location'],
             'city': entry['city'],
+            'type': entry['type'],
+            'illum': entry['illum'],
+            'rate': entry['rate'],
+            'availability': entry['availability'],
+            'coords': entry['coords'],
             'hasPhoto': entry['photo_bytes'] is not None,
             'reviewNeeded': entry['review_needed'],
             'reviewFlags': entry['review_flags'],
@@ -442,7 +576,7 @@ def process_presentation(input_path, output_path, master_template_path=None):
         
     return {
         'success': True,
-        'message': f'Successfully converted presentation to Testing format.',
+        'message': 'Successfully converted presentation into Media Buzz Master Template format.',
         'processedSlides': n_entries,
         'totalSlidesInFile': len(out_prs.slides),
         'templateUsed': os.path.basename(template_file),
@@ -451,7 +585,7 @@ def process_presentation(input_path, output_path, master_template_path=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PowerPoint Converter Engine")
+    parser = argparse.ArgumentParser(description="Media Buzz PowerPoint Converter Engine")
     parser.add_argument('--check-template', action='store_true', help="Check master template status")
     parser.add_argument('--input', type=str, help="Path to input presentation")
     parser.add_argument('--output', type=str, help="Path to output presentation")

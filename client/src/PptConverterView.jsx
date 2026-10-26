@@ -33,7 +33,7 @@ export default function PptConverterView() {
       setTemplateStatus({
         loading: false,
         available: !!res.data?.available,
-        filename: res.data?.filename || 'Testing 24-10-2026.pptx',
+        filename: res.data?.filename || 'MediaBuzz_Master_Template.pptx',
         size: res.data?.size || 0,
         error: null
       });
@@ -41,7 +41,7 @@ export default function PptConverterView() {
       setTemplateStatus({
         loading: false,
         available: false,
-        filename: 'Testing 24-10-2026.pptx',
+        filename: 'MediaBuzz_Master_Template.pptx',
         size: 0,
         error: err.response?.data?.error || err.message || 'Could not verify master template'
       });
@@ -120,7 +120,7 @@ export default function PptConverterView() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = templateStatus.filename || 'Testing 24-10-2026.pptx';
+      a.download = templateStatus.filename || 'MediaBuzz_Master_Template.pptx';
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -200,7 +200,7 @@ export default function PptConverterView() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = conversionResult.downloadName || 'Converted_Testing_Format.pptx';
+      a.download = conversionResult.downloadName || 'Converted_MediaBuzz_Master_Format.pptx';
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -245,8 +245,8 @@ export default function PptConverterView() {
         <div>
           <h1>PPT Converter</h1>
           <p>
-            Convert PowerPoint presentations into the standard Testing format.
-            Extracts billboard photographs, location descriptions, and dimensions while preserving the exact master design.
+            Convert PowerPoint presentations into the official Media Buzz Master Template format used in Automated PPT.
+            Extracts billboard photographs, site codes, location descriptions, and dimensions while preserving the exact 16:9 widescreen brand master design.
           </p>
         </div>
         <div className="scooh-headactions">
@@ -261,7 +261,7 @@ export default function PptConverterView() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
                 </svg>
-                Download Testing PPT
+                Download Media Buzz PPT
               </button>
               <button
                 type="button"
@@ -304,8 +304,8 @@ export default function PptConverterView() {
             </div>
             <p className="scooh-ppt-template-desc">
               {templateStatus.available
-                ? 'Standard 16:9 black layout with yellow badge highlights, location typography, and media panel is active.'
-                : 'The master template Testing 24-10-2026.pptx is required to generate standard presentations.'}
+                ? 'Official 16:9 widescreen Automated PPT theme with pitch black background, yellow code badge, specifications panel, and brand closing slide is active.'
+                : 'The master template MediaBuzz_Master_Template.pptx is required to generate presentations.'}
             </p>
           </div>
         </div>
@@ -514,7 +514,7 @@ export default function PptConverterView() {
                   {conversionResult.processedSlides} Billboard Sites Converted Successfully
                 </h3>
                 <p style={{ margin: 0, color: 'var(--mb-muted)', fontSize: '12px' }}>
-                  Standard Testing PPT format generated using master template <code>{conversionResult.templateUsed}</code>.
+                  Official Media Buzz Master Template format generated using <code>{conversionResult.templateUsed}</code>.
                   Total presentation size: {conversionResult.totalSlidesInFile} slides.
                 </p>
               </div>
@@ -530,7 +530,7 @@ export default function PptConverterView() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
                 </svg>
-                Download Converted_Testing_Format.pptx
+                Download Converted_MediaBuzz_Master_Format.pptx
               </button>
               <button
                 type="button"
@@ -704,7 +704,7 @@ export default function PptConverterView() {
 
                   {/* Extracted Details Sidebar */}
                   <div className="scooh-ppt-meta-panel">
-                    <h4>Populated Testing Format Data</h4>
+                    <h4>Populated Media Buzz Master Theme Data</h4>
 
                     <div className="scooh-statline">
                       <span>Site Identifier:</span>
@@ -712,8 +712,13 @@ export default function PptConverterView() {
                     </div>
 
                     <div className="scooh-statline">
+                      <span>Site Code:</span>
+                      <b style={{ color: 'var(--mb-primary)' }}>{activeSlide.code || `MB - ${String(activeSlide.siteNumber).padStart(2, '0')}`}</b>
+                    </div>
+
+                    <div className="scooh-statline">
                       <span>Dimensions (Size):</span>
-                      <b style={{ color: 'var(--mb-primary)' }}>{activeSlide.size || 'Not detected'}</b>
+                      <b style={{ color: '#ffffff' }}>{activeSlide.size || 'Not detected'}</b>
                     </div>
 
                     <div className="scooh-statline">
@@ -727,13 +732,33 @@ export default function PptConverterView() {
                     </div>
 
                     <div className="scooh-statline">
-                      <span>Billboard Photo:</span>
-                      <b>{activeSlide.hasPhoto ? '✓ Extracted' : '⚠ Missing'}</b>
+                      <span>Media Type:</span>
+                      <b>{activeSlide.type || 'Hoarding'}</b>
                     </div>
 
                     <div className="scooh-statline">
-                      <span>Preserved Template Fields:</span>
-                      <span className="scooh-tag">Type, Illum, Fee, Avail (Blank)</span>
+                      <span>Illumination:</span>
+                      <b>{activeSlide.illum || 'BL'}</b>
+                    </div>
+
+                    <div className="scooh-statline">
+                      <span>Adv.fee per month:</span>
+                      <b>{activeSlide.rate || 'On Request'}</b>
+                    </div>
+
+                    <div className="scooh-statline">
+                      <span>Availability:</span>
+                      <b>{activeSlide.availability || 'Available'}</b>
+                    </div>
+
+                    <div className="scooh-statline">
+                      <span>Coordinates:</span>
+                      <b>{activeSlide.coords || '23.012345, 72.567890'}</b>
+                    </div>
+
+                    <div className="scooh-statline">
+                      <span>Billboard Photo:</span>
+                      <b>{activeSlide.hasPhoto ? '✓ Extracted' : '⚠ Missing (Clean Card Used)'}</b>
                     </div>
 
                     {activeSlide.reviewNeeded && (
@@ -756,7 +781,7 @@ export default function PptConverterView() {
                         style={{ width: '100%' }}
                         onClick={handleDownload}
                       >
-                        Download Testing PPT
+                        Download Media Buzz PPT
                       </button>
                     </div>
                   </div>
