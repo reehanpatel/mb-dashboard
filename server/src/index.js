@@ -916,6 +916,42 @@ function getMasterTemplateInfo() {
   };
 }
 
+function getMasterExcelTemplateInfo() {
+  const candidates = [
+    path.join(__dirname, '..', 'templates', 'master_excel_template.xlsx'),
+    path.join(process.cwd(), 'server', 'templates', 'master_excel_template.xlsx'),
+    path.join(process.cwd(), 'templates', 'master_excel_template.xlsx'),
+    'C:\\Users\\reeha\\Downloads\\Jade Blue 16-10-2026.xlsx'
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      try {
+        const stats = fs.statSync(c);
+        return {
+          available: true,
+          path: c,
+          filename: 'Jade Blue 16-10-2026.xlsx',
+          size: stats.size,
+          masterColumns: [
+            'SR NO', 'City', 'LOCATION', 'MEDIA', 'LIGHT',
+            'W', 'H', 'SQ FT', 'AVAILABLITY', 'Selling Amount', 'Latitude Longitude'
+          ]
+        };
+      } catch (_) {}
+    }
+  }
+  return {
+    available: false,
+    path: null,
+    filename: 'Jade Blue 16-10-2026.xlsx',
+    size: 0,
+    masterColumns: [
+      'SR NO', 'City', 'LOCATION', 'MEDIA', 'LIGHT',
+      'W', 'H', 'SQ FT', 'AVAILABLITY', 'Selling Amount', 'Latitude Longitude'
+    ]
+  };
+}
+
 let resolvedPythonCmd = null;
 function getPythonCommand() {
   if (resolvedPythonCmd) return resolvedPythonCmd;
@@ -939,13 +975,13 @@ function getPythonCommand() {
     resolvedPythonCmd = candidates[0];
   }
 
-  // Ensure python-pptx is available; attempt user pip install if missing
+  // Ensure python-pptx, openpyxl, and Pillow are available
   try {
-    execSync(`${resolvedPythonCmd} -c "import pptx"`, { stdio: 'ignore', timeout: 4000 });
+    execSync(`${resolvedPythonCmd} -c "import pptx, openpyxl, PIL"`, { stdio: 'ignore', timeout: 4000 });
   } catch (_) {
     try {
-      console.log(`[PPT Converter] Attempting user pip install for python-pptx and Pillow via ${resolvedPythonCmd}...`);
-      execSync(`${resolvedPythonCmd} -m pip install --user python-pptx Pillow`, { stdio: 'ignore', timeout: 60000 });
+      console.log(`[PPT Converter] Attempting user pip install for python-pptx, openpyxl, Pillow via ${resolvedPythonCmd}...`);
+      execSync(`${resolvedPythonCmd} -m pip install --user python-pptx openpyxl Pillow`, { stdio: 'ignore', timeout: 60000 });
     } catch (pipErr) {
       console.warn('[PPT Converter] Auto-pip install notice:', pipErr.message);
     }
@@ -957,11 +993,13 @@ function getPythonCommand() {
 app.get('/api/ppt-converter/status', auth, (req, res) => {
   try {
     const tmplInfo = getMasterTemplateInfo();
+    const excelTmplInfo = getMasterExcelTemplateInfo();
     return res.json({
       available: tmplInfo.available,
       path: tmplInfo.path,
       filename: tmplInfo.filename,
       size: tmplInfo.size,
+      masterExcel: excelTmplInfo,
       error: tmplInfo.error || null
     });
   } catch (err) {
@@ -969,15 +1007,54 @@ app.get('/api/ppt-converter/status', auth, (req, res) => {
   }
 });
 
-app.post('/api/ppt-converter/convert', auth, upload.single('file'), (req, res) => {
+app.post('/api/ppt-converter/inspect-excel', auth, upload.single('file'), (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ message: 'No PowerPoint file uploaded.' });
+    return res.status(400).json({ message: 'No Excel file uploaded.' });
   }
   const inputPath = req.file.path;
   const originalName = req.file.originalname || '';
-  if (!originalName.toLowerCase().endsWith('.pptx')) {
+  const lowerName = originalName.toLowerCase();
+  if (!lowerName.endsWith('.xlsx') && !lowerName.endsWith('.xls')) {
     try { fs.unlinkSync(inputPath); } catch (_) {}
-    return res.status(400).json({ message: 'Only .pptx files are supported for conversion.' });
+    return res.status(400).json({ message: 'Only .xlsx or .xls files are supported for Excel inspection.' });
+  }
+
+  const engineScript = path.join(__dirname, 'ppt_converter_engine.py');
+  const pythonBin = getPythonCommand();
+
+  const args = [
+    engineScript,
+    '--inspect-excel', inputPath
+  ];
+
+  execFile(pythonBin, args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    try { fs.unlinkSync(inputPath); } catch (_) {}
+    if (err || !stdout) {
+      console.error('[Excel Inspection Error]', err, stderr);
+      return res.status(500).json({ message: 'Failed to inspect Excel workbook structure: ' + (stderr || err?.message) });
+    }
+    try {
+      const data = JSON.parse(stdout.trim());
+      return res.json(data);
+    } catch (parseErr) {
+      return res.status(500).json({ message: 'Failed to parse inspection output: ' + parseErr.message });
+    }
+  });
+});
+
+app.post('/api/ppt-converter/convert', auth, upload.single('file'), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ message: 'No file uploaded.' });
+  }
+  const inputPath = req.file.path;
+  const originalName = req.file.originalname || '';
+  const lowerName = originalName.toLowerCase();
+  const isPptx = lowerName.endsWith('.pptx');
+  const isExcel = lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls');
+
+  if (!isPptx && !isExcel) {
+    try { fs.unlinkSync(inputPath); } catch (_) {}
+    return res.status(400).json({ message: 'Only .pptx, .xlsx, or .xls files are supported for conversion.' });
   }
 
   const tmplInfo = getMasterTemplateInfo();
@@ -998,8 +1075,19 @@ app.post('/api/ppt-converter/convert', auth, upload.single('file'), (req, res) =
     '--template', tmplInfo.path
   ];
 
+  if (req.body.columnMapping) {
+    const mappingStr = typeof req.body.columnMapping === 'string'
+      ? req.body.columnMapping
+      : JSON.stringify(req.body.columnMapping);
+    args.push('--mapping', mappingStr);
+  }
+
+  if (req.body.sheetName) {
+    args.push('--sheet', String(req.body.sheetName));
+  }
+
   execFile(pythonBin, args, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
-    // Immediately unlink the raw uploaded presentation to avoid storing customer data
+    // Immediately unlink the raw uploaded presentation or workbook to protect customer data
     try { fs.unlinkSync(inputPath); } catch (_) {}
 
     const resultJsonPath = outputPath + '.json';
@@ -1027,7 +1115,7 @@ app.post('/api/ppt-converter/convert', auth, upload.single('file'), (req, res) =
       if (err && err.code === 'ENOENT') {
         errMsg = `Python runtime (${pythonBin}) was not found on this server. Please install python3.`;
       } else if (errMsg.includes('No module named') && errMsg.includes('pptx')) {
-        errMsg = 'Missing required python-pptx library on server. Please run: pip install python-pptx Pillow';
+        errMsg = 'Missing required python-pptx library on server. Please run: pip install python-pptx Pillow openpyxl';
       }
       console.error('[PPT Converter Error]', errMsg, stderr);
       return res.status(500).json({ message: errMsg });

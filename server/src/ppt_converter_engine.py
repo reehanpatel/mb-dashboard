@@ -36,11 +36,72 @@ except ImportError:
     ImageFont = None
     HAS_PIL = False
 
-# Optional pptx import (graceful fallback if not installed)
 try:
     import pptx
 except ImportError:
     pptx = None
+
+# Optional openpyxl import for Excel-to-PowerPoint conversion
+try:
+    import openpyxl
+    HAS_OPENPYXL = True
+except ImportError:
+    openpyxl = None
+    HAS_OPENPYXL = False
+
+# The 11 official master template columns from Jade Blue 16-10-2026.xlsx
+MASTER_TEMPLATE_COLUMNS = [
+    'SR NO',
+    'City',
+    'LOCATION',
+    'MEDIA',
+    'LIGHT',
+    'W',
+    'H',
+    'SQ FT',
+    'AVAILABLITY',
+    'Selling Amount',
+    'Latitude Longitude'
+]
+
+# Official 7-point Media Buzz software Terms & Conditions (from client/src/excelLogo.js)
+OFFICIAL_SOFTWARE_TERMS = [
+    "1. Before confirming any site, please check and confirm its availability.",
+    "2. 18% GST will be charged extra, as applicable.",
+    "3. Printing charges will be charged extra, as actual.",
+    "4. Mounting charges will be charged extra at ₹4 per sq. ft.",
+    "5. Payment Terms: Advance / within 30 days from the date of invoice.",
+    "6. Artwork/Flex must be provided within 2 days of site confirmation, otherwise the site may be released.",
+    "7. Cancellations require a minimum 10 days' notice; immediate cancellations are not accepted."
+]
+
+def format_inr(val):
+    """Formats monetary amounts into authentic Indian numbering format (e.g. ₹ 2,50,000/-)"""
+    if val is None or val == '':
+        return ""
+    try:
+        amt = float(val)
+        is_int = amt.is_integer()
+        amt_str = str(int(amt)) if is_int else f"{amt:.2f}"
+        parts = amt_str.split('.')
+        int_part = parts[0]
+        if len(int_part) <= 3:
+            res = int_part
+        else:
+            last3 = int_part[-3:]
+            rest = int_part[:-3]
+            groups = []
+            while len(rest) > 2:
+                groups.insert(0, rest[-2:])
+                rest = rest[:-2]
+            if rest:
+                groups.insert(0, rest)
+            res = ','.join(groups) + ',' + last3
+        if len(parts) > 1 and parts[1] != '00':
+            res += '.' + parts[1]
+        return f"₹ {res}/-"
+    except Exception:
+        return str(val)
 
 
 CANDIDATE_TEMPLATE_PATHS = [
@@ -281,18 +342,18 @@ def generate_slide_thumbnail(photo_bytes, site_num, code, size, location, city="
             draw.rounded_rectangle([bx, by, bx+bw, by+bh], radius=8, fill=(255, 194, 0))
             draw.text((bx + 18, by + 12), f"Site {site_num}", fill=(0, 0, 0))
             
-            draw.text((rx, 118), city or "Ahmedabad", fill=(255, 255, 255))
-            draw.text((rx, 148), location[:44] if location else "Location Details", fill=(255, 255, 255))
+            draw.text((rx, 118), city or "", fill=(255, 255, 255))
+            draw.text((rx, 148), location[:44] if location else "", fill=(255, 255, 255))
             if len(location) > 44:
                 draw.text((rx, 168), location[44:88], fill=(255, 255, 255))
                 
             fields = [
-                ("Size:", size or "30x10 ft"),
-                ("Type:", mtype or "Hoarding"),
-                ("Illumination:", illum or "BL"),
-                ("Adv.fee per month:", rate or "On Request"),
-                ("Availability:", avail or "Available"),
-                ("Location Coordinates:", coords or "23.012345, 72.567890")
+                ("Size:", size or ""),
+                ("Type:", mtype or ""),
+                ("Illumination:", illum or ""),
+                ("Adv.fee per month:", rate or ""),
+                ("Availability:", avail or ""),
+                ("Location Coordinates:", coords or "")
             ]
             
             fy = 192
@@ -312,6 +373,44 @@ def generate_slide_thumbnail(photo_bytes, site_num, code, size, location, city="
     if photo_bytes:
         try:
             return "data:image/jpeg;base64," + base64.b64encode(photo_bytes).decode('utf-8')
+        except Exception:
+            pass
+    return None
+
+def generate_terms_slide_thumbnail():
+    """Generates visual 16:9 JPEG preview for official Media Buzz software Terms & Conditions."""
+    if HAS_PIL and Image and ImageDraw:
+        try:
+            w, h = 800, 450
+            canvas = Image.new('RGB', (w, h), color=(0, 0, 0))
+            draw = ImageDraw.Draw(canvas)
+            
+            # Gold pill header
+            bx, by, bw, bh = 42, 35, 260, 42
+            draw.rounded_rectangle([bx, by, bx+bw, by+bh], radius=8, fill=(255, 194, 0))
+            draw.text((bx + 16, by + 12), "TERMS & CONDITIONS", fill=(0, 0, 0))
+            
+            # Subtitle
+            draw.text((42, 88), "Media Buzz Outdoor Media Contract Terms", fill=(255, 255, 255))
+            draw.text((42, 108), "Retrieved exclusively from Media Buzz software", fill=(74, 222, 128))
+            
+            # 7 terms lines
+            ty = 135
+            for idx, term in enumerate(OFFICIAL_SOFTWARE_TERMS):
+                dot_pos = term.find('.')
+                num_part = term[:dot_pos+1]
+                text_part = term[dot_pos+1:].strip()
+                draw.text((42, ty), num_part, fill=(255, 194, 0))
+                disp_text = text_part if len(text_part) <= 80 else text_part[:77] + '...'
+                draw.text((70, ty), disp_text, fill=(240, 240, 240))
+                ty += 34
+                
+            # Footer badge
+            draw.text((42, 410), "mediabuzzoutdoor.com", fill=(100, 116, 139))
+            
+            buf = io.BytesIO()
+            canvas.save(buf, format='JPEG', quality=85)
+            return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode('utf-8')
         except Exception:
             pass
     return None
@@ -405,8 +504,290 @@ def extract_entries_pure_zip(input_path):
             
     return entries
 
-def generate_converted_pptx_pure(template_file, output_path, entries):
-    """Generates the master template presentation with cloned slides using zipfile only."""
+def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None):
+    """
+    Extracts site entries from an Excel workbook based on the Master Template reference (Jade Blue 16-10-2026.xlsx).
+    Leaves missing values blank (Rule 8). Ignores any Terms & Conditions in the Excel sheet (Rule 7).
+    """
+    if not HAS_OPENPYXL or not openpyxl:
+        raise ImportError("openpyxl is required to parse Excel files. Please install openpyxl via pip.")
+
+    wb = openpyxl.load_workbook(excel_path, data_only=True)
+    if sheet_name and sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+    else:
+        ws = wb['Sites'] if 'Sites' in wb.sheetnames else wb.active
+
+    # Detect header row
+    header_row_idx = None
+    headers_found = []
+    
+    col_defs = [
+        ('sr_no', ['sr no', 'sr. no', 'srno', 'sr_no', 's.no', 'sno', 'serial no', 'site no', 'index']),
+        ('city', ['city', 'location city', 'town']),
+        ('location', ['location', 'site location', 'address', 'site address', 'site name', 'description']),
+        ('media', ['media', 'media type', 'type', 'display type']),
+        ('light', ['light', 'lighting', 'illumination', 'illum']),
+        ('w', ['w', 'width', 'w (ft)', 'w(ft)', 'w ft']),
+        ('h', ['h', 'height', 'h (ft)', 'h(ft)', 'h ft']),
+        ('sq_ft', ['sq ft', 'sqft', 'sq. ft', 'area', 'total sq ft']),
+        ('avail', ['availablity', 'availability', 'status', 'available from', 'booked till']),
+        ('rate', ['selling amount', 'selling rate', 'amount', 'rate', 'price', 'monthly rate', 'adv fee']),
+        ('coords', ['latitude longitude', 'lat long', 'latitude, longitude', 'lat, lng', 'lat/long', 'gps', 'coordinates'])
+    ]
+
+    for r in range(1, min(15, ws.max_row + 1)):
+        row_vals = [str(ws.cell(r, c).value or '').strip() for c in range(1, ws.max_column + 1)]
+        row_joined = ' '.join(row_vals).lower()
+        if 'location' in row_joined and ('media' in row_joined or 'city' in row_joined or 'sr no' in row_joined):
+            header_row_idx = r
+            headers_found = [str(ws.cell(r, c).value or '').strip() for c in range(1, ws.max_column + 1)]
+            break
+
+    if not header_row_idx:
+        header_row_idx = 2 if ws.max_row >= 2 else 1
+        headers_found = [str(ws.cell(header_row_idx, c).value or '').strip() for c in range(1, ws.max_column + 1)]
+
+    while headers_found and not headers_found[-1]:
+        headers_found.pop()
+
+    mapping = {}
+    if column_mapping:
+        mapping = column_mapping
+    else:
+        for c_idx, h in enumerate(headers_found, start=1):
+            h_clean = h.lower().strip()
+            for field, aliases in col_defs:
+                if field in mapping:
+                    continue
+                if any(h_clean == a for a in aliases):
+                    mapping[field] = c_idx
+                    break
+                elif any(len(a) > 1 and (a in h_clean or h_clean in a) for a in aliases):
+                    mapping[field] = c_idx
+                    break
+
+    # Read row images if any embedded in Excel sheet
+    row_images = {}
+    try:
+        if hasattr(ws, '_images') and ws._images:
+            for img in ws._images:
+                try:
+                    img_row = img.anchor._from.row + 1
+                    img_bytes = img.ref.getvalue() if hasattr(img.ref, 'getvalue') else img._data()
+                    if img_row not in row_images:
+                        row_images[img_row] = img_bytes
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    entries = []
+    for r in range(header_row_idx + 1, ws.max_row + 1):
+        row_text_all = ' '.join([str(ws.cell(r, c).value or '') for c in range(1, ws.max_column + 1)]).strip()
+        if not row_text_all:
+            continue
+        # Rule 7: Ignore Terms & Conditions in Excel workbook completely
+        if 'TERMS' in row_text_all.upper() and 'CONDITION' in row_text_all.upper():
+            break
+
+        def get_val(field):
+            col = mapping.get(field)
+            if col and col <= ws.max_column:
+                v = ws.cell(r, col).value
+                return str(v).strip() if v is not None else ""
+            return ""
+
+        sr_no = get_val('sr_no')
+        city = get_val('city')
+        loc = get_val('location')
+        media = get_val('media')
+        light = get_val('light')
+        w = get_val('w')
+        h = get_val('h')
+        sq_ft = get_val('sq_ft')
+        avail = get_val('avail')
+        rate_val = get_val('rate')
+        coords = get_val('coords')
+
+        if not loc and not city and not sr_no:
+            continue
+
+        size_str = ""
+        if w and h:
+            size_str = f"{w}x{h} ft"
+        elif sq_ft:
+            size_str = f"{sq_ft} sq.ft"
+
+        rate_str = format_inr(rate_val) if rate_val else ""
+
+        # Clean location without altering actual listing information
+        cleaned_loc = clean_location(loc, size_str, city_str=city) if loc else ""
+
+        review_flags = []
+        photo_bytes = row_images.get(r)
+        if not photo_bytes:
+            review_flags.append("Photo missing from sheet")
+        if not size_str:
+            review_flags.append("Size missing")
+        if not cleaned_loc:
+            review_flags.append("Location missing")
+
+        entries.append({
+            'source_slide': r,
+            'code': '',  # Do not invent site codes
+            'site_number': len(entries) + 1,
+            'sr_no': sr_no,
+            'city': city,
+            'location': cleaned_loc or loc,
+            'type': media,
+            'illum': light,
+            'size': size_str,
+            'rate': rate_str,
+            'availability': avail,
+            'coords': coords,
+            'photo_bytes': photo_bytes,
+            'review_needed': len(review_flags) > 0,
+            'review_flags': review_flags
+        })
+
+    return entries, headers_found, header_row_idx, mapping
+
+def inspect_excel(excel_path):
+    """
+    Inspects an uploaded Excel workbook, returns sheets, detected headers,
+    master template match status, mapping, and sample rows.
+    """
+    if not HAS_OPENPYXL or not openpyxl:
+        return {'success': False, 'error': 'openpyxl library not installed on server.'}
+
+    wb = openpyxl.load_workbook(excel_path, data_only=True)
+    sheet_names = wb.sheetnames
+    ws = wb['Sites'] if 'Sites' in sheet_names else wb.active
+    
+    header_row_idx = None
+    headers_found = []
+    
+    col_defs = [
+        ('sr_no', ['sr no', 'sr. no', 'srno', 'sr_no', 's.no', 'sno', 'serial no', 'site no', 'index']),
+        ('city', ['city', 'location city', 'town']),
+        ('location', ['location', 'site location', 'address', 'site address', 'site name', 'description']),
+        ('media', ['media', 'media type', 'type', 'display type']),
+        ('light', ['light', 'lighting', 'illumination', 'illum']),
+        ('w', ['w', 'width', 'w (ft)', 'w(ft)', 'w ft']),
+        ('h', ['h', 'height', 'h (ft)', 'h(ft)', 'h ft']),
+        ('sq_ft', ['sq ft', 'sqft', 'sq. ft', 'area', 'total sq ft']),
+        ('avail', ['availablity', 'availability', 'status', 'available from', 'booked till']),
+        ('rate', ['selling amount', 'selling rate', 'amount', 'rate', 'price', 'monthly rate', 'adv fee']),
+        ('coords', ['latitude longitude', 'lat long', 'latitude, longitude', 'lat, lng', 'lat/long', 'gps', 'coordinates'])
+    ]
+
+    for r in range(1, min(15, ws.max_row + 1)):
+        row_vals = [str(ws.cell(r, c).value or '').strip() for c in range(1, ws.max_column + 1)]
+        row_joined = ' '.join(row_vals).lower()
+        if 'location' in row_joined and ('media' in row_joined or 'city' in row_joined or 'sr no' in row_joined):
+            header_row_idx = r
+            headers_found = [str(ws.cell(r, c).value or '').strip() for c in range(1, ws.max_column + 1)]
+            break
+
+    if not header_row_idx:
+        header_row_idx = 2 if ws.max_row >= 2 else 1
+        headers_found = [str(ws.cell(header_row_idx, c).value or '').strip() for c in range(1, ws.max_column + 1)]
+
+    while headers_found and not headers_found[-1]:
+        headers_found.pop()
+
+    mapping = {}
+    for c_idx, h in enumerate(headers_found, start=1):
+        h_clean = h.lower().strip()
+        for field, aliases in col_defs:
+            if field in mapping:
+                continue
+            if any(h_clean == a for a in aliases):
+                mapping[field] = c_idx
+                break
+            elif any(len(a) > 1 and (a in h_clean or h_clean in a) for a in aliases):
+                mapping[field] = c_idx
+                break
+
+    headers_norm = [h.strip().upper() for h in headers_found[:len(MASTER_TEMPLATE_COLUMNS)]]
+    master_norm = [m.strip().upper() for m in MASTER_TEMPLATE_COLUMNS]
+    matches_master = (headers_norm == master_norm)
+
+    sample_rows = []
+    total_sites = 0
+    terms_detected = False
+
+    for r in range(header_row_idx + 1, ws.max_row + 1):
+        row_text_all = ' '.join([str(ws.cell(r, c).value or '') for c in range(1, ws.max_column + 1)]).strip()
+        if not row_text_all:
+            continue
+        if 'TERMS' in row_text_all.upper() and 'CONDITION' in row_text_all.upper():
+            terms_detected = True
+            break
+
+        def get_val(field):
+            col = mapping.get(field)
+            if col and col <= ws.max_column:
+                v = ws.cell(r, col).value
+                return str(v).strip() if v is not None else ""
+            return ""
+
+        sr_no = get_val('sr_no')
+        city = get_val('city')
+        loc = get_val('location')
+        media = get_val('media')
+        light = get_val('light')
+        w = get_val('w')
+        h = get_val('h')
+        sq_ft = get_val('sq_ft')
+        avail = get_val('avail')
+        rate_val = get_val('rate')
+        coords = get_val('coords')
+
+        if not loc and not city and not sr_no:
+            continue
+
+        size_str = ""
+        if w and h:
+            size_str = f"{w}x{h} ft"
+        elif sq_ft:
+            size_str = f"{sq_ft} sq.ft"
+
+        rate_str = format_inr(rate_val) if rate_val else ""
+
+        total_sites += 1
+        if len(sample_rows) < 5:
+            sample_rows.append({
+                'row': r,
+                'sr_no': sr_no,
+                'city': city,
+                'location': loc,
+                'media': media,
+                'light': light,
+                'size': size_str,
+                'rate': rate_str,
+                'avail': avail,
+                'coords': coords
+            })
+
+    return {
+        'success': True,
+        'sheets': sheet_names,
+        'activeSheet': ws.title,
+        'headerRow': header_row_idx,
+        'headers': headers_found,
+        'matchesMaster': matches_master,
+        'masterColumns': MASTER_TEMPLATE_COLUMNS,
+        'mapping': mapping,
+        'sampleRows': sample_rows,
+        'totalSites': total_sites,
+        'termsDetected': terms_detected,
+        'termsNotice': "Terms & Conditions present in workbook will be ignored. Official 7-point Media Buzz software Terms & Conditions will be used exclusively."
+    }
+
+def generate_converted_pptx_pure(template_file, output_path, entries, is_excel=False):
+    """Generates the master template presentation with cloned slides and official software Terms & Conditions."""
     with zipfile.ZipFile(template_file, 'r') as z_in:
         files = {f.filename: z_in.read(f.filename) for f in z_in.filelist}
 
@@ -420,16 +801,16 @@ def generate_converted_pptx_pure(template_file, output_path, entries):
     pres_xml_str = files['ppt/presentation.xml'].decode('utf-8')
     pres_rels_str = files['ppt/_rels/presentation.xml.rels'].decode('utf-8')
 
-    # Find highest rId in presentation.xml.rels
     existing_rids = [int(m) for m in re.findall(r'rId(\d+)', pres_rels_str)]
     max_rid = max(existing_rids) if existing_rids else 20
 
-    # ONLY match sldId id attributes, NOT sldMasterId id="2147483648"!
     existing_sldids = [int(m) for m in re.findall(r'<p:sldId\s+id="(\d+)"', pres_xml_str)]
     max_sldid = max(existing_sldids) if existing_sldids else 300
 
     n_sites = len(entries)
-    closing_slide_num = n_sites + 3
+    terms_slide_num = n_sites + 3
+    closing_slide_num = n_sites + 4
+
     closing_xml_data = files['ppt/slides/slide5.xml']
     closing_rels_data = files.get('ppt/slides/_rels/slide5.xml.rels')
 
@@ -443,12 +824,6 @@ def generate_converted_pptx_pure(template_file, output_path, entries):
         closing_rels_str = re.sub(r'<Relationship[^>]*relationships/notesSlide[^>]*/>', '', closing_rels_str)
         closing_rels_data = closing_rels_str.encode('utf-8')
 
-    closing_slide_filename = f"ppt/slides/slide{closing_slide_num}.xml"
-    closing_rels_filename = f"ppt/slides/_rels/slide{closing_slide_num}.xml.rels"
-    files[closing_slide_filename] = closing_xml_data
-    if closing_rels_data:
-        files[closing_rels_filename] = closing_rels_data
-
     content_types_str = re.sub(r'<Override\s+PartName="/ppt/slides/slide[35]\.xml"[^>]*/>', '', content_types_str)
 
     sld_id_list = [
@@ -459,6 +834,7 @@ def generate_converted_pptx_pure(template_file, output_path, entries):
     pres_rels_str = re.sub(r'<Relationship\s+Id="rId4"[^>]*/>', '', pres_rels_str)
     pres_rels_str = re.sub(r'<Relationship\s+Id="rId6"[^>]*/>', '', pres_rels_str)
 
+    # 1. Generate Site Slides
     for idx, entry in enumerate(entries):
         site_num = idx + 1
         slide_idx = site_num + 2
@@ -469,7 +845,7 @@ def generate_converted_pptx_pure(template_file, output_path, entries):
         rels_xml = base_rels_xml_str
 
         site_label = f"Site {site_num}"
-        # Shape 0: Clear the redundant small text above the badge so it is not repeated
+        # Shape 0: Clear redundant small text above badge
         slide_xml = re.sub(r'(<a:t[^>]*>)Site\s*\d+(</a:t>)', r'\g<1>\g<2>', slide_xml, count=1)
 
         # Yellow badge (Shape 2): Highlight "Site 1", "Site 2" without any artificial site code
@@ -478,18 +854,19 @@ def generate_converted_pptx_pure(template_file, output_path, entries):
                           'Target="https://panel.mediabuzzoutdoor.com/campaigns"',
                           rels_xml)
 
-        city = entry.get('city') or 'Ahmedabad'
+        city = entry.get('city') or ''
         slide_xml = slide_xml.replace('Ahmedabad', saxutils.escape(city))
 
-        loc = entry.get('location') or 'Prime Billboard Location'
+        loc = entry.get('location') or ''
         slide_xml = slide_xml.replace('Shivranjani Bridge- Fcg. Shyamal 4 road Jnc - Left (1)', saxutils.escape(loc))
 
-        size = entry.get('size') or '30x10 ft'
-        mtype = entry.get('type') or 'Hoarding'
-        illum = entry.get('illum') or 'BL'
-        rate = entry.get('rate') or 'On Request'
-        avail = entry.get('availability') or 'Available'
-        coords = entry.get('coords') or '23.012345, 72.567890'
+        # Do not invent values; leave missing values blank (Rule 8)
+        size = entry.get('size') or ''
+        mtype = entry.get('type') or ''
+        illum = entry.get('illum') or ''
+        rate = entry.get('rate') or ''
+        avail = entry.get('availability') or ''
+        coords = entry.get('coords') or ''
 
         slide_xml = slide_xml.replace('30x10 ft', saxutils.escape(size))
         slide_xml = slide_xml.replace('Gantry', saxutils.escape(mtype))
@@ -522,6 +899,57 @@ def generate_converted_pptx_pure(template_file, output_path, entries):
         max_sldid += 1
         sld_id_list.append(f'<p:sldId id="{max_sldid}" r:id="{rid}"/>')
 
+    # 2. Generate Terms & Conditions Slide (Official Media Buzz Software Terms - Rule 7)
+    terms_slide_filename = f"ppt/slides/slide{terms_slide_num}.xml"
+    terms_rels_filename = f"ppt/slides/_rels/slide{terms_slide_num}.xml.rels"
+
+    terms_xml = base_slide_xml_str
+    terms_xml = re.sub(r'(<a:t[^>]*>)Site\s*\d+(</a:t>)', r'\g<1>\g<2>', terms_xml, count=1)
+    terms_xml = terms_xml.replace('MB - 07', 'TERMS &amp; CONDITIONS')
+    terms_xml = terms_xml.replace('Ahmedabad', 'Terms &amp; Conditions')
+    terms_xml = terms_xml.replace('Shivranjani Bridge- Fcg. Shyamal 4 road Jnc - Left (1)', 'Media Buzz Outdoor Media Contract Terms')
+    
+    terms_xml = terms_xml.replace('Size:  ', '1. ')
+    terms_xml = terms_xml.replace('30x10 ft', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[0][3:]))
+    
+    terms_xml = terms_xml.replace('Type:  ', '2. ')
+    terms_xml = terms_xml.replace('Gantry', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[1][3:]))
+    
+    terms_xml = terms_xml.replace('Illumination:  ', '3. ')
+    terms_xml = terms_xml.replace('BL', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[2][3:]))
+    
+    terms_xml = terms_xml.replace('Adv.fee per month:  ', '4. ')
+    terms_xml = terms_xml.replace('₹ 2,25,000/-', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[3][3:]))
+    
+    terms_xml = terms_xml.replace('Availability:  ', '5. ')
+    terms_xml = terms_xml.replace('Booked till 30 Sept 2026', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[4][3:]))
+    
+    terms_xml = terms_xml.replace('Location Coordinates:  ', '6. ')
+    terms_xml = terms_xml.replace('23.018881, 72.530022', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[5][3:] + " " + OFFICIAL_SOFTWARE_TERMS[6]))
+
+    files[terms_slide_filename] = terms_xml.encode('utf-8')
+    files[terms_rels_filename] = base_rels_xml_str.encode('utf-8')
+
+    content_types_str = content_types_str.replace(
+        '</Types>',
+        f'<Override PartName="/{terms_slide_filename}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>'
+    )
+    max_rid += 1
+    terms_rid = f"rId{max_rid}"
+    pres_rels_str = pres_rels_str.replace(
+        '</Relationships>',
+        f'<Relationship Id="{terms_rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide{terms_slide_num}.xml"/></Relationships>'
+    )
+    max_sldid += 1
+    sld_id_list.append(f'<p:sldId id="{max_sldid}" r:id="{terms_rid}"/>')
+
+    # 3. Generate Closing Slide
+    closing_slide_filename = f"ppt/slides/slide{closing_slide_num}.xml"
+    closing_rels_filename = f"ppt/slides/_rels/slide{closing_slide_num}.xml.rels"
+    files[closing_slide_filename] = closing_xml_data
+    if closing_rels_data:
+        files[closing_rels_filename] = closing_rels_data
+
     content_types_str = content_types_str.replace(
         '</Types>',
         f'<Override PartName="/{closing_slide_filename}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>'
@@ -535,6 +963,7 @@ def generate_converted_pptx_pure(template_file, output_path, entries):
     max_sldid += 1
     sld_id_list.append(f'<p:sldId id="{max_sldid}" r:id="{closing_rid}"/>')
 
+    # Update presentation.xml and rels
     pres_xml_str = re.sub(r'<p:sldIdLst>.*?</p:sldIdLst>', f'<p:sldIdLst>{"".join(sld_id_list)}</p:sldIdLst>', pres_xml_str)
 
     files['[Content_Types].xml'] = content_types_str.encode('utf-8')
@@ -547,54 +976,87 @@ def generate_converted_pptx_pure(template_file, output_path, entries):
             z_out.writestr(fname, data)
 
 
-def process_presentation_pure(input_path, output_path, template_file):
-    """Processes conversion using pure Python standard library only."""
-    entries = extract_entries_pure_zip(input_path)
+def process_presentation_pure(input_path, output_path, template_file, mapping=None, sheet_name=None):
+    """Processes conversion for PPTX or Excel using pure Python standard library & OpenXML."""
+    is_excel = input_path.lower().endswith(('.xlsx', '.xls'))
+    headers_detected = []
+    mapping_used = {}
+    
+    if is_excel:
+        entries, headers_detected, h_idx, mapping_used = extract_entries_from_excel(input_path, column_mapping=mapping, sheet_name=sheet_name)
+    else:
+        entries = extract_entries_pure_zip(input_path)
+
     if not entries:
-        raise ValueError("Could not extract any location or billboard slides from the uploaded presentation.")
+        raise ValueError("Could not extract any location or billboard listings from the uploaded file.")
         
-    generate_converted_pptx_pure(template_file, output_path, entries)
+    generate_converted_pptx_pure(template_file, output_path, entries, is_excel=is_excel)
     
     slide_previews = []
     for idx, entry in enumerate(entries):
         site_num = idx + 1
         thumb_data = generate_slide_thumbnail(
-            entry['photo_bytes'],
+            entry.get('photo_bytes'),
             site_num,
-            entry['code'],
-            entry['size'],
-            entry['location'],
-            entry['city'],
-            entry['type'],
-            entry['illum'],
-            entry['rate'],
-            entry['availability'],
-            entry['coords']
+            entry.get('code') or '',
+            entry.get('size') or '',
+            entry.get('location') or '',
+            entry.get('city') or '',
+            entry.get('type') or '',
+            entry.get('illum') or '',
+            entry.get('rate') or '',
+            entry.get('availability') or '',
+            entry.get('coords') or ''
         )
         slide_previews.append({
             'siteNumber': site_num,
             'sourceSlide': entry['source_slide'],
-            'code': entry['code'],
-            'size': entry['size'],
-            'location': entry['location'],
-            'city': entry['city'],
-            'type': entry['type'],
-            'illum': entry['illum'],
-            'rate': entry['rate'],
-            'availability': entry['availability'],
-            'coords': entry['coords'],
-            'hasPhoto': entry['photo_bytes'] is not None,
-            'reviewNeeded': entry['review_needed'],
-            'reviewFlags': entry['review_flags'],
+            'code': entry.get('code') or '',
+            'size': entry.get('size') or '',
+            'location': entry.get('location') or '',
+            'city': entry.get('city') or '',
+            'type': entry.get('type') or '',
+            'illum': entry.get('illum') or '',
+            'rate': entry.get('rate') or '',
+            'availability': entry.get('availability') or '',
+            'coords': entry.get('coords') or '',
+            'hasPhoto': entry.get('photo_bytes') is not None,
+            'reviewNeeded': entry.get('review_needed', False),
+            'reviewFlags': entry.get('review_flags', []),
             'previewUrl': thumb_data
         })
+
+    # Append Terms & Conditions slide preview (Official software terms - Rule 7 & 9)
+    terms_thumb = generate_terms_slide_thumbnail()
+    slide_previews.append({
+        'siteNumber': 'Terms & Conditions',
+        'isTermsSlide': True,
+        'sourceSlide': 'Media Buzz Software',
+        'code': '',
+        'size': '',
+        'location': 'Official Media Buzz Software Terms & Conditions (7 Points)',
+        'city': 'All Markets',
+        'type': 'Terms',
+        'illum': 'Contract',
+        'rate': '7-Point Terms Preserved',
+        'availability': 'Official Policy',
+        'coords': '',
+        'hasPhoto': False,
+        'reviewNeeded': False,
+        'reviewFlags': [],
+        'previewUrl': terms_thumb
+    })
         
     return {
         'success': True,
-        'message': 'Successfully converted presentation into Media Buzz Master Template format.',
+        'isExcel': is_excel,
+        'softwareTermsVerified': True,
+        'message': 'Successfully converted into Media Buzz Master Template format.',
         'processedSlides': len(entries),
-        'totalSlidesInFile': len(entries) + 3, # Cover 1, Cover 2, sites..., Closing
+        'totalSlidesInFile': len(entries) + 4, # Cover 1, Cover 2, N sites, Terms, Closing
         'templateUsed': os.path.basename(template_file),
+        'headers': headers_detected,
+        'mapping': mapping_used,
         'slides': slide_previews
     }
 
@@ -870,27 +1332,31 @@ def process_presentation_pptx(input_path, output_path, template_file):
         'slides': slide_previews
     }
 
-def process_presentation(input_path, output_path, master_template_path=None):
+def process_presentation(input_path, output_path, master_template_path=None, mapping=None, sheet_name=None):
     """
     Main conversion entrypoint.
     Executes zero-dependency OpenXML engine ensuring 100% valid PowerPoint files.
+    Supports both PowerPoint (.pptx) and Excel (.xlsx, .xls) files.
     """
     template_file = find_master_template(master_template_path)
     if not template_file:
         raise FileNotFoundError("Media Buzz master template not found. Searched candidate paths.")
         
     if not os.path.isfile(input_path):
-        raise FileNotFoundError(f"Input PowerPoint presentation not found at: {input_path}")
+        raise FileNotFoundError(f"Input file not found at: {input_path}")
         
-    return process_presentation_pure(input_path, output_path, template_file)
+    return process_presentation_pure(input_path, output_path, template_file, mapping=mapping, sheet_name=sheet_name)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Media Buzz PowerPoint Converter Engine")
+    parser = argparse.ArgumentParser(description="Media Buzz PowerPoint & Excel Converter Engine")
     parser.add_argument('--check-template', action='store_true', help="Check master template status")
-    parser.add_argument('--input', type=str, help="Path to input presentation")
+    parser.add_argument('--inspect-excel', type=str, help="Inspect structure of an uploaded Excel workbook")
+    parser.add_argument('--input', type=str, help="Path to input presentation or Excel workbook")
     parser.add_argument('--output', type=str, help="Path to output presentation")
     parser.add_argument('--template', type=str, help="Path to master template")
+    parser.add_argument('--mapping', type=str, help="JSON-encoded custom column mapping")
+    parser.add_argument('--sheet', type=str, help="Target worksheet name for Excel conversion")
     args = parser.parse_args()
     
     if args.check_template:
@@ -909,14 +1375,30 @@ def main():
             }
         print(json.dumps(res, ensure_ascii=True))
         return
+
+    if args.inspect_excel:
+        if not os.path.isfile(args.inspect_excel):
+            err_res = {'success': False, 'error': f"Excel file not found at: {args.inspect_excel}"}
+            print(json.dumps(err_res, ensure_ascii=True))
+            sys.exit(1)
+        res = inspect_excel(args.inspect_excel)
+        print(json.dumps(res, ensure_ascii=True))
+        return
         
     if not args.input or not args.output:
         err_res = {'success': False, 'error': 'Both --input and --output are required for conversion.'}
         print(json.dumps(err_res, ensure_ascii=True))
         sys.exit(1)
+
+    col_mapping = None
+    if args.mapping:
+        try:
+            col_mapping = json.loads(args.mapping)
+        except Exception as mErr:
+            sys.stderr.write(f"[PPT Engine] Notice parsing mapping: {mErr}\n")
         
     try:
-        res = process_presentation(args.input, args.output, args.template)
+        res = process_presentation(args.input, args.output, args.template, mapping=col_mapping, sheet_name=args.sheet)
         # Write full result file to disk to prevent stdout buffer overflow
         result_json_path = args.output + '.json'
         try:
