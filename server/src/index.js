@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import express from 'express';import cors from 'cors';import helmet from 'helmet';import path from 'path';import fs from 'fs';import multer from 'multer';import bcrypt from 'bcryptjs';import {fileURLToPath} from 'url';import * as xlsxModule from 'xlsx';import { execFile } from 'child_process';
+import express from 'express';import cors from 'cors';import helmet from 'helmet';import path from 'path';import fs from 'fs';import multer from 'multer';import bcrypt from 'bcryptjs';import {fileURLToPath} from 'url';import * as xlsxModule from 'xlsx';import { execFile, execSync } from 'child_process';
 const XLSX = xlsxModule.default || xlsxModule;
 try {
   if (XLSX.set_fs) XLSX.set_fs(fs);
@@ -871,19 +871,87 @@ app.delete('/api/ppt-pages/:key', auth, async (req, res) => {
 // ==========================================
 // PPT Converter Module Endpoints
 // ==========================================
-app.get('/api/ppt-converter/status', auth, (req, res) => {
-  const engineScript = path.join(__dirname, 'ppt_converter_engine.py');
-  execFile('python', [engineScript, '--check-template'], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-    if (err) {
-      return res.status(500).json({ available: false, error: stderr || err.message });
+
+// Fast, direct filesystem master template discovery (0ms, no Python subprocess spawn)
+function getMasterTemplateInfo() {
+  const candidateNames = [
+    'MediaBuzz_Master_Template.pptx',
+    'Testing 24-10-2026.pptx',
+    'Testing  24-10-2026.pptx'
+  ];
+  const candidateDirs = [
+    templatesDir,
+    path.resolve(__dirname, '..', 'templates'),
+    path.resolve(__dirname, 'templates'),
+    path.resolve(process.cwd(), 'server', 'templates'),
+    path.resolve(process.cwd(), 'templates')
+  ];
+
+  for (const dir of candidateDirs) {
+    if (!dir) continue;
+    for (const name of candidateNames) {
+      const p = path.join(dir, name);
+      try {
+        if (fs.existsSync(p)) {
+          const stat = fs.statSync(p);
+          if (stat.isFile() && stat.size > 1000) {
+            return {
+              available: true,
+              path: p,
+              filename: name,
+              size: stat.size
+            };
+          }
+        }
+      } catch (_) {}
     }
+  }
+
+  return {
+    available: false,
+    path: null,
+    filename: 'MediaBuzz_Master_Template.pptx',
+    size: 0,
+    error: 'Master template MediaBuzz_Master_Template.pptx is missing from server templates directory.'
+  };
+}
+
+let resolvedPythonCmd = null;
+function getPythonCommand() {
+  if (resolvedPythonCmd) return resolvedPythonCmd;
+  if (process.env.PYTHON_BIN && process.env.PYTHON_BIN.trim()) {
+    resolvedPythonCmd = process.env.PYTHON_BIN.trim();
+    return resolvedPythonCmd;
+  }
+  const candidates = process.platform === 'win32'
+    ? ['python', 'py', 'python3']
+    : ['python3', 'python'];
+
+  for (const bin of candidates) {
     try {
-      const data = JSON.parse(stdout.trim());
-      res.json(data);
-    } catch (parseErr) {
-      res.status(500).json({ available: false, error: 'Failed to parse template status output' });
-    }
-  });
+      execSync(`${bin} --version`, { stdio: 'ignore', timeout: 3000 });
+      resolvedPythonCmd = bin;
+      console.log(`[PPT Converter] Resolved Python executable: ${bin}`);
+      return bin;
+    } catch (_) {}
+  }
+  resolvedPythonCmd = candidates[0];
+  return resolvedPythonCmd;
+}
+
+app.get('/api/ppt-converter/status', auth, (req, res) => {
+  try {
+    const tmplInfo = getMasterTemplateInfo();
+    return res.json({
+      available: tmplInfo.available,
+      path: tmplInfo.path,
+      filename: tmplInfo.filename,
+      size: tmplInfo.size,
+      error: tmplInfo.error || null
+    });
+  } catch (err) {
+    return res.status(500).json({ available: false, error: err.message });
+  }
 });
 
 app.post('/api/ppt-converter/convert', auth, upload.single('file'), (req, res) => {
@@ -897,17 +965,37 @@ app.post('/api/ppt-converter/convert', auth, upload.single('file'), (req, res) =
     return res.status(400).json({ message: 'Only .pptx files are supported for conversion.' });
   }
 
+  const tmplInfo = getMasterTemplateInfo();
+  if (!tmplInfo.available || !tmplInfo.path) {
+    try { fs.unlinkSync(inputPath); } catch (_) {}
+    return res.status(400).json({ message: 'Master template MediaBuzz_Master_Template.pptx is missing on server.' });
+  }
+
   const downloadId = `Converted_MediaBuzz_Master_Format-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pptx`;
   const outputPath = path.join(convertedDir, downloadId);
   const engineScript = path.join(__dirname, 'ppt_converter_engine.py');
+  const pythonBin = getPythonCommand();
 
-  execFile('python', [engineScript, '--input', inputPath, '--output', outputPath], { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
+  const args = [
+    engineScript,
+    '--input', inputPath,
+    '--output', outputPath,
+    '--template', tmplInfo.path
+  ];
+
+  execFile(pythonBin, args, { maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
     // Immediately unlink the raw uploaded presentation to avoid storing customer data
     try { fs.unlinkSync(inputPath); } catch (_) {}
 
     if (err) {
       console.error('[PPT Converter Error]', stderr || err.message);
-      return res.status(500).json({ message: stderr || err.message || 'Conversion processing failed.' });
+      let errMsg = stderr || err.message || 'Conversion processing failed.';
+      if (err.code === 'ENOENT') {
+        errMsg = `Python runtime (${pythonBin}) was not found on this server. Please install python3.`;
+      } else if (errMsg.includes('No module named') && errMsg.includes('pptx')) {
+        errMsg = 'Missing required python-pptx library on server. Please run: pip install python-pptx Pillow';
+      }
+      return res.status(500).json({ message: errMsg });
     }
 
     try {
@@ -939,16 +1027,13 @@ app.get('/api/ppt-converter/download/:downloadId', auth, (req, res) => {
 });
 
 app.get('/api/ppt-converter/template/download', auth, (req, res) => {
-  let templatePath = path.join(templatesDir, 'MediaBuzz_Master_Template.pptx');
-  if (!fs.existsSync(templatePath)) {
-    templatePath = path.join(templatesDir, 'Testing 24-10-2026.pptx');
-  }
-  if (!fs.existsSync(templatePath)) {
+  const tmplInfo = getMasterTemplateInfo();
+  if (!tmplInfo.available || !tmplInfo.path || !fs.existsSync(tmplInfo.path)) {
     return res.status(404).json({ message: 'Master template file not found on server.' });
   }
-  res.setHeader('Content-Disposition', 'attachment; filename="MediaBuzz_Master_Template.pptx"');
+  res.setHeader('Content-Disposition', `attachment; filename="${tmplInfo.filename}"`);
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
-  res.sendFile(templatePath);
+  res.sendFile(tmplInfo.path);
 });
 
 app.post('/api/ppt-converter/template', auth, managerOrAdmin, upload.single('file'), (req, res) => {
@@ -965,7 +1050,7 @@ app.post('/api/ppt-converter/template', auth, managerOrAdmin, upload.single('fil
     fs.copyFileSync(req.file.path, destPath1);
     fs.copyFileSync(req.file.path, destPath2);
     try { fs.unlinkSync(req.file.path); } catch (_) {}
-    res.json({ success: true, message: 'Master template updated successfully.', size: fs.statSync(destPath1).size });
+    res.json({ success: true, message: 'Master template updated successfully.', size: fs.statSync(destPath1).size, filename: 'MediaBuzz_Master_Template.pptx' });
   } catch (err) {
     res.status(500).json({ message: 'Failed to update template: ' + err.message });
   }
