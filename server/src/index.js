@@ -1002,28 +1002,44 @@ app.post('/api/ppt-converter/convert', auth, upload.single('file'), (req, res) =
     // Immediately unlink the raw uploaded presentation to avoid storing customer data
     try { fs.unlinkSync(inputPath); } catch (_) {}
 
-    if (err) {
-      console.error('[PPT Converter Error]', stderr || err.message);
-      let errMsg = stderr || err.message || 'Conversion processing failed.';
-      if (err.code === 'ENOENT') {
+    const resultJsonPath = outputPath + '.json';
+    let result = null;
+
+    // 1. Try reading full structured result from disk (prevents stdout buffer overflow)
+    if (fs.existsSync(resultJsonPath)) {
+      try {
+        result = JSON.parse(fs.readFileSync(resultJsonPath, 'utf8'));
+        try { fs.unlinkSync(resultJsonPath); } catch (_) {}
+      } catch (fErr) {
+        console.warn('[PPT Converter] Result file parse notice:', fErr.message);
+      }
+    }
+
+    // 2. Next try parsing stdout
+    if (!result && stdout && stdout.trim()) {
+      try {
+        result = JSON.parse(stdout.trim());
+      } catch (_) {}
+    }
+
+    if (err || (result && !result.success)) {
+      let errMsg = (result && result.error) || (stderr && stderr.trim()) || (err && err.message) || 'Conversion processing failed.';
+      if (err && err.code === 'ENOENT') {
         errMsg = `Python runtime (${pythonBin}) was not found on this server. Please install python3.`;
       } else if (errMsg.includes('No module named') && errMsg.includes('pptx')) {
         errMsg = 'Missing required python-pptx library on server. Please run: pip install python-pptx Pillow';
       }
+      console.error('[PPT Converter Error]', errMsg, stderr);
       return res.status(500).json({ message: errMsg });
     }
 
-    try {
-      const result = JSON.parse(stdout.trim());
-      if (!result.success) {
-        return res.status(400).json({ message: result.error || 'Conversion process failed.' });
-      }
-      result.downloadId = downloadId;
-      result.downloadName = 'Converted_MediaBuzz_Master_Format.pptx';
-      res.json(result);
-    } catch (parseErr) {
-      res.status(500).json({ message: 'Failed to parse engine output: ' + parseErr.message });
+    if (!result) {
+      return res.status(500).json({ message: 'Conversion completed but output result was empty.' });
     }
+
+    result.downloadId = downloadId;
+    result.downloadName = 'Converted_MediaBuzz_Master_Format.pptx';
+    res.json(result);
   });
 });
 
