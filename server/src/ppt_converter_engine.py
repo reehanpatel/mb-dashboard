@@ -13,16 +13,31 @@ import copy
 import io
 import base64
 import argparse
-from PIL import Image, ImageDraw, ImageFont
+# Optional PIL import
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    HAS_PIL = True
+except ImportError:
+    Image = None
+    ImageDraw = None
+    ImageFont = None
+    HAS_PIL = False
 
-# Ensure utf-8 encoding for stdout
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
-
+# Optional pptx import with auto-pip install fallback
 try:
     import pptx
 except ImportError:
-    pptx = None
+    try:
+        import subprocess
+        subprocess.run([sys.executable, "-m", "pip", "install", "--user", "python-pptx", "Pillow"], capture_output=True, timeout=90)
+        import pptx
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            HAS_PIL = True
+        except ImportError:
+            pass
+    except Exception:
+        pptx = None
 
 
 CANDIDATE_TEMPLATE_PATHS = [
@@ -170,19 +185,30 @@ def detect_coords(text):
         return re.sub(r'\s+', ' ', m2.group(1).strip())
     return '23.012345, 72.567890'
 
+# 1x1 dark gray (#111111) PNG base64 fallback when PIL is not installed
+_DARK_PIXEL_PNG = (
+    b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde'
+    b'\x00\x00\x00\x0cIDATx\x9cc\x14\x14\x14\x00\x00\x00f\x00\x1f\xbf\x95\xed\xe4\x00\x00\x00\x00IEND\xaeB`\x82'
+)
+
 def generate_no_photo_bytes():
-    """Generates a clean 1500x1224 dark card image for missing photos matching Automated PPT."""
-    w, h = 1500, 1224
-    img = Image.new('RGB', (w, h), color=(17, 17, 17))
-    draw = ImageDraw.Draw(img)
-    # Border
-    draw.rectangle([10, 10, w - 10, h - 10], outline=(42, 42, 42), width=3)
-    text = "NO SITE PHOTO UPLOADED"
-    # Centered text
-    draw.text((w // 2 - 250, h // 2 - 20), text, fill=(85, 85, 85))
-    buf = io.BytesIO()
-    img.save(buf, format='PNG')
-    return buf.getvalue()
+    """Generates clean placeholder image bytes for missing photos matching Automated PPT."""
+    if HAS_PIL and Image and ImageDraw:
+        try:
+            w, h = 1500, 1224
+            img = Image.new('RGB', (w, h), color=(17, 17, 17))
+            draw = ImageDraw.Draw(img)
+            # Border
+            draw.rectangle([10, 10, w - 10, h - 10], outline=(42, 42, 42), width=3)
+            text = "NO SITE PHOTO UPLOADED"
+            # Centered text
+            draw.text((w // 2 - 250, h // 2 - 20), text, fill=(85, 85, 85))
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            return buf.getvalue()
+        except Exception:
+            pass
+    return _DARK_PIXEL_PNG
 
 def duplicate_slide(prs, src_slide):
     """
@@ -216,72 +242,85 @@ def duplicate_slide(prs, src_slide):
 def generate_slide_thumbnail(photo_bytes, site_num, code, size, location, city="", mtype="Hoarding", illum="BL", rate="On Request", avail="Available", coords="23.012345, 72.567890"):
     """
     Generates a visual 16:9 JPEG preview matching the exact Automated PPT master theme.
+    If PIL is not installed, gracefully returns extracted photo bytes directly or None.
     """
-    w, h = 800, 450
-    canvas = Image.new('RGB', (w, h), color=(0, 0, 0))
-    draw = ImageDraw.Draw(canvas)
-    
-    # Left: Photo card at px=42, py=42, pw=375, ph=306
-    px, py, pw, ph = 42, 42, 375, 306
-    draw.rectangle([px-1, py-1, px+pw+1, py+ph+1], outline=(40, 50, 65), width=1)
-    
+    if HAS_PIL and Image and ImageDraw:
+        try:
+            w, h = 800, 450
+            canvas = Image.new('RGB', (w, h), color=(0, 0, 0))
+            draw = ImageDraw.Draw(canvas)
+            
+            # Left: Photo card at px=42, py=42, pw=375, ph=306
+            px, py, pw, ph = 42, 42, 375, 306
+            draw.rectangle([px-1, py-1, px+pw+1, py+ph+1], outline=(40, 50, 65), width=1)
+            
+            if photo_bytes:
+                try:
+                    with Image.open(io.BytesIO(photo_bytes)) as img:
+                        img_copy = img.copy()
+                        img_copy.thumbnail((pw, ph), Image.Resampling.LANCZOS)
+                        ix = px + (pw - img_copy.width) // 2
+                        iy = py + (ph - img_copy.height) // 2
+                        canvas.paste(img_copy, (ix, iy))
+                except Exception:
+                    draw.text((px + 20, py + 140), "Photo preview unavailable", fill=(160, 160, 160))
+            else:
+                draw.rectangle([px, py, px+pw, py+ph], fill=(17, 17, 17))
+                draw.text((px + 90, py + 140), "NO SITE PHOTO UPLOADED", fill=(85, 85, 85))
+                
+            # Official Media Buzz logo badge at bottom-left
+            lb_x, lb_y, lb_w, lb_h = 42, 363, 111, 45
+            draw.rounded_rectangle([lb_x, lb_y, lb_x + lb_w, lb_y + lb_h], radius=8, fill=(255, 194, 0))
+            draw.text((lb_x + 14, lb_y + 8), "MEDIA BUZZ", fill=(3, 3, 82))
+            draw.text((lb_x + 28, lb_y + 24), "Be Seen", fill=(3, 3, 82))
+            
+            # Right: Information panel
+            rx = 447
+            draw.text((rx, 42), f"Site {site_num}", fill=(255, 255, 255))
+            
+            # Yellow badge for Site Code (e.g. MB - 01)
+            bx, by, bw, bh = rx, 63, 160, 43
+            draw.rounded_rectangle([bx, by, bx+bw, by+bh], radius=8, fill=(255, 194, 0))
+            draw.text((bx + 18, by + 12), code or f"MB - {site_num:02d}", fill=(0, 0, 0))
+            
+            # City (Bold pure white)
+            draw.text((rx, 118), city or "Ahmedabad", fill=(255, 255, 255))
+                
+            # Location description
+            draw.text((rx, 148), location[:44] if location else "Location Details", fill=(255, 255, 255))
+            if len(location) > 44:
+                draw.text((rx, 168), location[44:88], fill=(255, 255, 255))
+                
+            # 6 Specification rows matching Automated PPT
+            fields = [
+                ("Size:", size or "30x10 ft"),
+                ("Type:", mtype or "Hoarding"),
+                ("Illumination:", illum or "BL"),
+                ("Adv.fee per month:", rate or "On Request"),
+                ("Availability:", avail or "Available"),
+                ("Location Coordinates:", coords or "23.012345, 72.567890")
+            ]
+            
+            fy = 192
+            for label, val in fields:
+                draw.text((rx, fy), label, fill=(255, 194, 0))
+                draw.text((rx + 145, fy), val, fill=(255, 255, 255))
+                draw.line([rx, fy + 20, rx + 325, fy + 20], fill=(45, 45, 45), width=1)
+                fy += 29
+                
+            buf = io.BytesIO()
+            canvas.save(buf, format='JPEG', quality=85)
+            return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode('utf-8')
+        except Exception:
+            pass
+
+    # Fallback when PIL is missing: return extracted photo directly if present
     if photo_bytes:
         try:
-            with Image.open(io.BytesIO(photo_bytes)) as img:
-                img_copy = img.copy()
-                img_copy.thumbnail((pw, ph), Image.Resampling.LANCZOS)
-                ix = px + (pw - img_copy.width) // 2
-                iy = py + (ph - img_copy.height) // 2
-                canvas.paste(img_copy, (ix, iy))
+            return "data:image/jpeg;base64," + base64.b64encode(photo_bytes).decode('utf-8')
         except Exception:
-            draw.text((px + 20, py + 140), "Photo preview unavailable", fill=(160, 160, 160))
-    else:
-        draw.rectangle([px, py, px+pw, py+ph], fill=(17, 17, 17))
-        draw.text((px + 90, py + 140), "NO SITE PHOTO UPLOADED", fill=(85, 85, 85))
-        
-    # Official Media Buzz logo badge at bottom-left
-    lb_x, lb_y, lb_w, lb_h = 42, 363, 111, 45
-    draw.rounded_rectangle([lb_x, lb_y, lb_x + lb_w, lb_y + lb_h], radius=8, fill=(255, 194, 0))
-    draw.text((lb_x + 14, lb_y + 8), "MEDIA BUZZ", fill=(3, 3, 82))
-    draw.text((lb_x + 28, lb_y + 24), "Be Seen", fill=(3, 3, 82))
-    
-    # Right: Information panel
-    rx = 447
-    draw.text((rx, 42), f"Site {site_num}", fill=(255, 255, 255))
-    
-    # Yellow badge for Site Code (e.g. MB - 01)
-    bx, by, bw, bh = rx, 63, 160, 43
-    draw.rounded_rectangle([bx, by, bx+bw, by+bh], radius=8, fill=(255, 194, 0))
-    draw.text((bx + 18, by + 12), code or f"MB - {site_num:02d}", fill=(0, 0, 0))
-    
-    # City (Bold pure white)
-    draw.text((rx, 118), city or "Ahmedabad", fill=(255, 255, 255))
-        
-    # Location description
-    draw.text((rx, 148), location[:44] if location else "Location Details", fill=(255, 255, 255))
-    if len(location) > 44:
-        draw.text((rx, 168), location[44:88], fill=(255, 255, 255))
-        
-    # 6 Specification rows matching Automated PPT
-    fields = [
-        ("Size:", size or "30x10 ft"),
-        ("Type:", mtype or "Hoarding"),
-        ("Illumination:", illum or "BL"),
-        ("Adv.fee per month:", rate or "On Request"),
-        ("Availability:", avail or "Available"),
-        ("Location Coordinates:", coords or "23.012345, 72.567890")
-    ]
-    
-    fy = 192
-    for label, val in fields:
-        draw.text((rx, fy), label, fill=(255, 194, 0))
-        draw.text((rx + 145, fy), val, fill=(255, 255, 255))
-        draw.line([rx, fy + 20, rx + 325, fy + 20], fill=(45, 45, 45), width=1)
-        fy += 29
-        
-    buf = io.BytesIO()
-    canvas.save(buf, format='JPEG', quality=85)
-    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode('utf-8')
+            pass
+    return None
 
 
 def process_presentation(input_path, output_path, master_template_path=None):

@@ -932,10 +932,25 @@ function getPythonCommand() {
       execSync(`${bin} --version`, { stdio: 'ignore', timeout: 3000 });
       resolvedPythonCmd = bin;
       console.log(`[PPT Converter] Resolved Python executable: ${bin}`);
-      return bin;
+      break;
     } catch (_) {}
   }
-  resolvedPythonCmd = candidates[0];
+  if (!resolvedPythonCmd) {
+    resolvedPythonCmd = candidates[0];
+  }
+
+  // Ensure python-pptx is available; attempt user pip install if missing
+  try {
+    execSync(`${resolvedPythonCmd} -c "import pptx"`, { stdio: 'ignore', timeout: 4000 });
+  } catch (_) {
+    try {
+      console.log(`[PPT Converter] Attempting user pip install for python-pptx and Pillow via ${resolvedPythonCmd}...`);
+      execSync(`${resolvedPythonCmd} -m pip install --user python-pptx Pillow`, { stdio: 'ignore', timeout: 60000 });
+    } catch (pipErr) {
+      console.warn('[PPT Converter] Auto-pip install notice:', pipErr.message);
+    }
+  }
+
   return resolvedPythonCmd;
 }
 
