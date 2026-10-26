@@ -1093,6 +1093,11 @@ app.post('/api/ppt-converter/convert', auth, pptMultiUpload, (req, res) => {
     '--template', tmplInfo.path
   ];
 
+  // User requirement: In PPT Converter, omit the Terms & Conditions slide from the presentation
+  if (req.body.includeTerms !== 'true') {
+    args.push('--no-terms');
+  }
+
   if (companionFile?.path) {
     args.push('--companion-excel', companionFile.path);
   }
@@ -1200,6 +1205,10 @@ app.post('/api/excel-converter/convert', auth, upload.single('file'), (req, res)
     '--output', outputPath,
     '--template', tmplInfo.path
   ];
+
+  if (req.body.includeTerms !== 'true') {
+    args.push('--no-terms');
+  }
 
   if (manualCity) {
     args.push('--manual-city', manualCity);

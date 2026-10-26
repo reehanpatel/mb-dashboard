@@ -729,10 +729,10 @@ export default function PptConverterView() {
                   {conversionResult.processedSlides} Billboard Slides Converted into Master Format
                 </h3>
                 <p style={{ margin: 0, color: 'var(--mb-muted)', fontSize: '12px' }}>
-                  Official 16:9 widescreen layout with verified software Terms & Conditions.
+                  Official 16:9 widescreen layout without unnecessary terms slide.
                   {conversionResult.companionMerged && (
                     <span style={{ color: '#4ade80', marginLeft: '6px', fontWeight: 700 }}>
-                      ✓ Availability, Coordinates & Specs successfully merged from companion Excel.
+                      ✓ Availability Date & GPS Coordinates successfully merged from companion Excel into slides.
                     </span>
                   )}
                   {conversionResult.manualCity && (
@@ -801,7 +801,7 @@ export default function PptConverterView() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
               <div>
                 <h3 style={{ margin: '0 0 2px', color: '#fff' }}>Converted Presentation Slides ({slides.length})</h3>
-                <span className="scooh-footnote">Includes Title Covers, Billboard Sites, Terms & Conditions, and Closing Slide</span>
+                <span className="scooh-footnote">Includes Title Covers, Billboard Sites, and Closing Slide (Clean Presentation without Terms Slide)</span>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button

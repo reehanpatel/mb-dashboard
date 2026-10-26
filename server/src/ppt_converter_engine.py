@@ -15,6 +15,7 @@ import io
 import base64
 import argparse
 import zipfile
+import datetime
 import xml.etree.ElementTree as ET
 import xml.sax.saxutils as saxutils
 
@@ -118,6 +119,166 @@ def format_inr(val):
         return f"₹ {res}/-"
     except Exception:
         return str(val)
+
+def format_excel_date(val):
+    """Parses date, timestamp, Excel date code or string into clean DD.MM.YYYY format."""
+    if val is None or str(val).strip() == '':
+        return ""
+    if isinstance(val, (datetime.date, datetime.datetime)):
+        return val.strftime('%d.%m.%Y')
+    if isinstance(val, (int, float)) and val > 20000:
+        try:
+            d = datetime.date(1899, 12, 30) + datetime.timedelta(days=int(val))
+            return d.strftime('%d.%m.%Y')
+        except Exception:
+            pass
+    s = str(val).strip()
+    # Strip timestamp if present (e.g. '2026-10-30 00:00:00')
+    s_clean = re.sub(r'\s+\d{1,2}:\d{2}(:\d{2})?(\.\d+)?$', '', s)
+    m_iso = re.match(r'^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})', s_clean)
+    if m_iso:
+        return f"{int(m_iso.group(3)):02d}.{int(m_iso.group(2)):02d}.{m_iso.group(1)}"
+    m_dmy = re.match(r'^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})', s_clean)
+    if m_dmy:
+        return f"{int(m_dmy.group(1)):02d}.{int(m_dmy.group(2)):02d}.{m_dmy.group(3)}"
+    # Month name parsing: 30-Oct-2026, 30 Oct 2026, Oct 30, 2026
+    month_map = {'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+                 'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12}
+    m_named = re.search(r'(\d{1,2})[-/\s]+([A-Za-z]{3,9})[-/,\s]+(\d{4})', s_clean)
+    if m_named:
+        d_val = int(m_named.group(1))
+        m_str = m_named.group(2)[:3].lower()
+        y_val = m_named.group(3)
+        if m_str in month_map:
+            return f"{d_val:02d}.{month_map[m_str]:02d}.{y_val}"
+    return s
+
+def format_gps_coords(raw_coords, raw_lat=None, raw_lng=None):
+    """Formats GPS / Coordinates into standard decimal format (e.g. 23.018881, 72.530022)."""
+    if raw_coords and str(raw_coords).strip():
+        s = str(raw_coords).strip()
+        m = re.search(r'(-?\d{1,3}\.\d{4,8})\s*[,/ ]\s*(-?\d{1,3}\.\d{4,8})', s)
+        if m:
+            return f"{float(m.group(1)):.6f}, {float(m.group(2)):.6f}"
+        m_dms = re.search(r'(\d+)[°\s]+(\d+)?[\'′\s]*([\d\.]+)?["]?\s*([NSns]).*?(\d+)[°\s]+(\d+)?[\'′\s]*([\d\.]+)?["]?\s*([EWew])', s)
+        if m_dms:
+            try:
+                lat = float(m_dms.group(1)) + float(m_dms.group(2) or 0)/60 + float(m_dms.group(3) or 0)/3600
+                if m_dms.group(4).upper() == 'S': lat = -lat
+                lng = float(m_dms.group(5)) + float(m_dms.group(6) or 0)/60 + float(m_dms.group(7) or 0)/3600
+                if m_dms.group(8).upper() == 'W': lng = -lng
+                return f"{lat:.6f}, {lng:.6f}"
+            except Exception:
+                pass
+        return s
+    if raw_lat is not None and raw_lng is not None:
+        s_lat = str(raw_lat).strip()
+        s_lng = str(raw_lng).strip()
+        if s_lat and s_lng:
+            try:
+                return f"{float(s_lat):.6f}, {float(s_lng):.6f}"
+            except Exception:
+                return f"{s_lat}, {s_lng}"
+    return ""
+
+HEADER_KEYWORDS = [
+    'sr', 'sno', 'srno', 'serial', 'code', 'mb code', 'site code', 'site id', 'siteid', 'mbcode',
+    'location', 'address', 'area', 'landmark', 'site name', 'site', 'description', 'specification',
+    'city', 'town', 'district', 'media', 'mediatype', 'type', 'display',
+    'light', 'lighting', 'illumination', 'illum',
+    'width', 'height', 'w', 'h', 'size', 'dimension', 'dimensions', 'sqft', 'sq ft', 'area',
+    'avail', 'availability', 'availablity', 'status', 'date', 'down date', 'up date', 'vacant', 'booked',
+    'rate', 'selling', 'amount', 'fee', 'price', 'rent', 'cost',
+    'lat', 'latitude', 'long', 'longitude', 'lng', 'gps', 'coord', 'coordinates',
+    'client', 'remarks'
+]
+
+COL_DEFINITIONS = [
+    ('code', ['mb code / site code', 'mb code', 'site code', 'mb_code', 'site_code', 'site id', 'sitecode', 'code', 'site no', 'siteno', 'mb no', 'mbno', 'id']),
+    ('sr_no', ['sr no', 'sr. no', 'srno', 'sr_no', 's.no', 'sno', 'serial no', 'serial', 'index', 'no.']),
+    ('city', ['city', 'location city', 'town', 'district', 'market']),
+    ('location', ['location / specification', 'location/specification', 'location', 'site location', 'address', 'site address', 'site name', 'landmark', 'road / location', 'description', 'site', 'area / landmark', 'area']),
+    ('media', ['media type', 'media_type', 'mediatype', 'billboard type', 'type', 'format', 'media', 'display type', 'display']),
+    ('light', ['light', 'lighting', 'illumination', 'illum', 'light type']),
+    ('w', ['w', 'width', 'w (ft)', 'w(ft)', 'w ft', 'width (ft)', 'width in feet']),
+    ('h', ['h', 'height', 'h (ft)', 'h(ft)', 'h ft', 'height (ft)', 'height in feet']),
+    ('size', ['size', 'dimensions', 'dimension', 'size (ft)', 'size (wxh)', 'size(ft)']),
+    ('sq_ft', ['sq ft', 'sqft', 'sq. ft', 'area (sq ft)', 'area (sqft)', 'total sqft', 'total sq ft', 'sq_ft', 'area']),
+    ('avail', ['availablity', 'availability', 'down date', 'available from', 'booked till', 'vacant from', 'free from', 'ready from', 'up date', 'expiry', 'valid till', 'end date', 'booking date', 'date', 'status', 'vacant']),
+    ('rate', ['selling amount', 'selling rate', 'amount', 'rate', 'price', 'monthly rate', 'adv fee per month', 'adv fee', 'adv. fee', 'rental', 'cost']),
+    ('coords', ['latitude longitude', 'lat long', 'latitude, longitude', 'lat, lng', 'lat/long', 'lat - long', 'gps', 'coordinates', 'geo coordinates', 'location coordinates', 'coords']),
+    ('lat', ['latitude', 'lat', 'latitude (n)', 'latitude(n)']),
+    ('lng', ['longitude', 'long', 'lng', 'lon', 'longitude (e)', 'longitude(e)'])
+]
+
+def detect_best_sheet_and_headers(wb, requested_sheet=None, column_mapping=None):
+    """
+    Scans workbook sheets and header rows using multi-keyword scoring to find the true data sheet and header row.
+    """
+    candidate_sheets = []
+    if requested_sheet and requested_sheet in wb.sheetnames:
+        candidate_sheets = [wb[requested_sheet]]
+    else:
+        for sname in wb.sheetnames:
+            candidate_sheets.append(wb[sname])
+
+    best_ws = candidate_sheets[0]
+    best_row_idx = 1
+    best_headers = []
+    best_score = -1
+
+    for ws in candidate_sheets:
+        max_r = min(15, ws.max_row) if ws.max_row else 1
+        max_c = ws.max_column if ws.max_column else 1
+        for r in range(1, max_r + 1):
+            row_vals = [str(ws.cell(r, c).value or '').strip() for c in range(1, max_c + 1)]
+            score = sum(1 for val in row_vals if any(kw in val.lower().replace('_', ' ') for kw in HEADER_KEYWORDS if val))
+            if score > best_score:
+                best_score = score
+                best_ws = ws
+                best_row_idx = r
+                best_headers = row_vals
+
+    if best_score < 2:
+        best_ws = wb[requested_sheet] if requested_sheet and requested_sheet in wb.sheetnames else (wb['Sites'] if 'Sites' in wb.sheetnames else wb.active)
+        best_row_idx = 1
+        best_headers = [str(best_ws.cell(1, c).value or '').strip() for c in range(1, best_ws.max_column + 1)]
+
+    while best_headers and not best_headers[-1]:
+        best_headers.pop()
+
+    mapping = {}
+    if column_mapping:
+        mapping = dict(column_mapping)
+    else:
+        # Pass 1: Exact matches
+        for c_idx, h in enumerate(best_headers, start=1):
+            h_clean = h.lower().strip().replace('_', ' ')
+            if not h_clean: continue
+            for field, aliases in COL_DEFINITIONS:
+                if field in mapping: continue
+                if any(h_clean == a for a in aliases):
+                    mapping[field] = c_idx
+                    break
+
+        # Pass 2: High-confidence word-boundary substring matches
+        for c_idx, h in enumerate(best_headers, start=1):
+            h_clean = h.lower().strip().replace('_', ' ')
+            if not h_clean: continue
+            if c_idx in mapping.values(): continue
+            for field, aliases in COL_DEFINITIONS:
+                if field in mapping: continue
+                matched_alias = False
+                for a in aliases:
+                    if len(a) >= 3 and re.search(r'\b' + re.escape(a) + r'\b', h_clean):
+                        mapping[field] = c_idx
+                        matched_alias = True
+                        break
+                if matched_alias:
+                    break
+
+    return best_ws, best_row_idx, best_headers, mapping
+
 
 
 CANDIDATE_TEMPLATE_PATHS = [
@@ -696,59 +857,9 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
     Leaves missing values blank (Rule 8). Ignores any Terms & Conditions in the Excel sheet (Rule 7).
     """
     wb = load_any_workbook(excel_path)
-    if sheet_name and sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-    else:
-        ws = wb['Sites'] if 'Sites' in wb.sheetnames else wb.active
-
-    # Detect header row
-    header_row_idx = None
-    headers_found = []
-    
-    col_defs = [
-        ('sr_no', ['sr no', 'sr. no', 'srno', 'sr_no', 's.no', 'sno', 'serial no', 'site no', 'index']),
-        ('city', ['city', 'location city', 'town']),
-        ('location', ['location', 'site location', 'address', 'site address', 'site name', 'description']),
-        ('media', ['media', 'media type', 'type', 'display type']),
-        ('light', ['light', 'lighting', 'illumination', 'illum']),
-        ('w', ['w', 'width', 'w (ft)', 'w(ft)', 'w ft']),
-        ('h', ['h', 'height', 'h (ft)', 'h(ft)', 'h ft']),
-        ('sq_ft', ['sq ft', 'sqft', 'sq. ft', 'area', 'total sq ft']),
-        ('avail', ['availablity', 'availability', 'status', 'available from', 'booked till']),
-        ('rate', ['selling amount', 'selling rate', 'amount', 'rate', 'price', 'monthly rate', 'adv fee']),
-        ('coords', ['latitude longitude', 'lat long', 'latitude, longitude', 'lat, lng', 'lat/long', 'gps', 'coordinates'])
-    ]
-
-    for r in range(1, min(15, ws.max_row + 1)):
-        row_vals = [str(ws.cell(r, c).value or '').strip() for c in range(1, ws.max_column + 1)]
-        row_joined = ' '.join(row_vals).lower()
-        if 'location' in row_joined and ('media' in row_joined or 'city' in row_joined or 'sr no' in row_joined):
-            header_row_idx = r
-            headers_found = [str(ws.cell(r, c).value or '').strip() for c in range(1, ws.max_column + 1)]
-            break
-
-    if not header_row_idx:
-        header_row_idx = 2 if ws.max_row >= 2 else 1
-        headers_found = [str(ws.cell(header_row_idx, c).value or '').strip() for c in range(1, ws.max_column + 1)]
-
-    while headers_found and not headers_found[-1]:
-        headers_found.pop()
-
-    mapping = {}
-    if column_mapping:
-        mapping = column_mapping
-    else:
-        for c_idx, h in enumerate(headers_found, start=1):
-            h_clean = h.lower().strip()
-            for field, aliases in col_defs:
-                if field in mapping:
-                    continue
-                if any(h_clean == a for a in aliases):
-                    mapping[field] = c_idx
-                    break
-                elif any(len(a) > 1 and (a in h_clean or h_clean in a) for a in aliases):
-                    mapping[field] = c_idx
-                    break
+    ws, header_row_idx, headers_found, mapping = detect_best_sheet_and_headers(
+        wb, requested_sheet=sheet_name, column_mapping=column_mapping
+    )
 
     # Read row images if any embedded in Excel sheet
     row_images = {}
@@ -781,6 +892,7 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
                 return str(v).strip() if v is not None else ""
             return ""
 
+        code_val = get_val('code')
         sr_no = get_val('sr_no')
         city = get_val('city')
         loc = get_val('location')
@@ -789,18 +901,53 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
         w = get_val('w')
         h = get_val('h')
         sq_ft = get_val('sq_ft')
-        avail = get_val('avail')
+        size_raw = get_val('size')
+        avail_raw = get_val('avail')
         rate_val = get_val('rate')
-        coords = get_val('coords')
+        coords_raw = get_val('coords')
+        lat_val = get_val('lat')
+        lng_val = get_val('lng')
 
-        if not loc and not city and not sr_no:
+        # Skip completely empty rows
+        if not loc and not city and not sr_no and not code_val and not coords_raw:
             continue
 
+        # Clean code
+        code_str = ""
+        if code_val:
+            m_code = re.search(r'\b(MB\s*[-–—]?\s*\d+)\b', code_val, re.IGNORECASE)
+            code_str = m_code.group(1).upper() if m_code else code_val
+        if not code_str:
+            code_str = f"MB - {len(entries) + 1:02d}"
+
+        # Clean dimensions / size
         size_str = ""
         if w and h:
             size_str = f"{w}x{h} ft"
+        elif size_raw:
+            size_str = size_raw
         elif sq_ft:
             size_str = f"{sq_ft} sq.ft"
+        elif loc:
+            detected_size = extract_size(loc)
+            if detected_size:
+                size_str = detected_size
+
+        # Media & Illumination fallback
+        if not media and loc:
+            media = detect_media_type(loc)
+        if not light and loc:
+            light = detect_illumination(loc)
+
+        # Availability parsing
+        avail = format_excel_date(avail_raw) if avail_raw else "Available"
+
+        # Coords parsing
+        coords = format_gps_coords(coords_raw, lat_val, lng_val)
+        if not coords and loc:
+            m_geo = re.search(r'\b(\d{1,2}\.\d{4,8}\s*,\s*\d{1,2}\.\d{4,8})\b', loc)
+            if m_geo:
+                coords = m_geo.group(1).strip()
 
         rate_str = format_inr(rate_val) if rate_val else ""
 
@@ -818,7 +965,7 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
 
         entries.append({
             'source_slide': r,
-            'code': f"MB - {len(entries) + 1:02d}",
+            'code': code_str,
             'site_number': len(entries) + 1,
             'sr_no': sr_no or str(len(entries) + 1),
             'city': city,
@@ -850,52 +997,7 @@ def inspect_excel(excel_path):
         return {'success': False, 'error': f"Failed to open Excel workbook: {str(e)}"}
 
     sheet_names = wb.sheetnames
-    ws = wb['Sites'] if 'Sites' in sheet_names else wb.active
-    
-    header_row_idx = None
-    headers_found = []
-    
-    col_defs = [
-        ('sr_no', ['sr no', 'sr. no', 'srno', 'sr_no', 's.no', 'sno', 'serial no', 'site no', 'index']),
-        ('city', ['city', 'location city', 'town']),
-        ('location', ['location', 'site location', 'address', 'site address', 'site name', 'description']),
-        ('media', ['media', 'media type', 'type', 'display type']),
-        ('light', ['light', 'lighting', 'illumination', 'illum']),
-        ('w', ['w', 'width', 'w (ft)', 'w(ft)', 'w ft']),
-        ('h', ['h', 'height', 'h (ft)', 'h(ft)', 'h ft']),
-        ('sq_ft', ['sq ft', 'sqft', 'sq. ft', 'area', 'total sq ft']),
-        ('avail', ['availablity', 'availability', 'status', 'available from', 'booked till']),
-        ('rate', ['selling amount', 'selling rate', 'amount', 'rate', 'price', 'monthly rate', 'adv fee']),
-        ('coords', ['latitude longitude', 'lat long', 'latitude, longitude', 'lat, lng', 'lat/long', 'gps', 'coordinates'])
-    ]
-
-    for r in range(1, min(15, ws.max_row + 1)):
-        row_vals = [str(ws.cell(r, c).value or '').strip() for c in range(1, ws.max_column + 1)]
-        row_joined = ' '.join(row_vals).lower()
-        if 'location' in row_joined and ('media' in row_joined or 'city' in row_joined or 'sr no' in row_joined):
-            header_row_idx = r
-            headers_found = [str(ws.cell(r, c).value or '').strip() for c in range(1, ws.max_column + 1)]
-            break
-
-    if not header_row_idx:
-        header_row_idx = 2 if ws.max_row >= 2 else 1
-        headers_found = [str(ws.cell(header_row_idx, c).value or '').strip() for c in range(1, ws.max_column + 1)]
-
-    while headers_found and not headers_found[-1]:
-        headers_found.pop()
-
-    mapping = {}
-    for c_idx, h in enumerate(headers_found, start=1):
-        h_clean = h.lower().strip()
-        for field, aliases in col_defs:
-            if field in mapping:
-                continue
-            if any(h_clean == a for a in aliases):
-                mapping[field] = c_idx
-                break
-            elif any(len(a) > 1 and (a in h_clean or h_clean in a) for a in aliases):
-                mapping[field] = c_idx
-                break
+    ws, header_row_idx, headers_found, mapping = detect_best_sheet_and_headers(wb)
 
     headers_norm = [h.strip().upper() for h in headers_found[:len(MASTER_TEMPLATE_COLUMNS)]]
     master_norm = [m.strip().upper() for m in MASTER_TEMPLATE_COLUMNS]
@@ -921,6 +1023,7 @@ def inspect_excel(excel_path):
             return ""
 
         sr_no = get_val('sr_no')
+        code_val = get_val('code')
         city = get_val('city')
         loc = get_val('location')
         media = get_val('media')
@@ -928,18 +1031,23 @@ def inspect_excel(excel_path):
         w = get_val('w')
         h = get_val('h')
         sq_ft = get_val('sq_ft')
-        avail = get_val('avail')
+        size_raw = get_val('size')
+        avail = format_excel_date(get_val('avail'))
         rate_val = get_val('rate')
-        coords = get_val('coords')
+        coords = format_gps_coords(get_val('coords'), get_val('lat'), get_val('lng'))
 
-        if not loc and not city and not sr_no:
+        if not loc and not city and not sr_no and not code_val and not coords:
             continue
 
         size_str = ""
         if w and h:
             size_str = f"{w}x{h} ft"
+        elif size_raw:
+            size_str = size_raw
         elif sq_ft:
             size_str = f"{sq_ft} sq.ft"
+        elif loc:
+            size_str = extract_size(loc) or ""
 
         rate_str = format_inr(rate_val) if rate_val else ""
 
@@ -947,14 +1055,14 @@ def inspect_excel(excel_path):
         if len(sample_rows) < 5:
             sample_rows.append({
                 'row': r,
-                'sr_no': sr_no,
+                'sr_no': sr_no or (code_val or str(total_sites)),
                 'city': city,
                 'location': loc,
-                'media': media,
-                'light': light,
+                'media': media or 'Hoarding',
+                'light': light or 'BL',
                 'size': size_str,
                 'rate': rate_str,
-                'avail': avail,
+                'avail': avail or 'Available',
                 'coords': coords
             })
 
@@ -975,7 +1083,7 @@ def inspect_excel(excel_path):
 
 def merge_companion_excel(ppt_entries, companion_excel_path, column_mapping=None, sheet_name=None):
     """
-    Extracts site data from companion Excel workbook (availability, coordinates / latitude longitude,
+    Extracts site data from companion Excel workbook (availability date, coordinates / latitude longitude,
     rates, media, illumination, etc.) and enriches the PPT entries.
     Matches by site code / number, location keyword match, or sequential slide order.
     """
@@ -992,27 +1100,32 @@ def merge_companion_excel(ppt_entries, companion_excel_path, column_mapping=None
     if not excel_entries:
         return ppt_entries
 
+    def clean_c(c):
+        return re.sub(r'[^a-zA-Z0-9]', '', str(c or '')).lower()
+
     # Build lookup maps
     code_map = {}
     sr_map = {}
     for x in excel_entries:
-        if x.get('code'):
-            code_map[str(x['code']).lower().strip()] = x
-        if x.get('sr_no'):
-            sr_map[str(x['sr_no']).lower().strip()] = x
+        c_code = clean_c(x.get('code'))
+        if c_code:
+            code_map[c_code] = x
+        c_sr = clean_c(x.get('sr_no'))
+        if c_sr:
+            sr_map[c_sr] = x
 
     for idx, entry in enumerate(ppt_entries):
         matched = None
-        ppt_code = str(entry.get('code') or '').lower().strip()
-        ppt_num = str(entry.get('site_number') or (idx + 1)).strip()
+        ppt_code = clean_c(entry.get('code'))
+        ppt_num = clean_c(entry.get('site_number') or (idx + 1))
 
-        # 1. Match by exact code or number
+        # 1. Match by normalized code
         if ppt_code and ppt_code in code_map:
             matched = code_map[ppt_code]
         elif ppt_num and ppt_num in sr_map:
             matched = sr_map[ppt_num]
-        elif str(idx + 1) in sr_map:
-            matched = sr_map[str(idx + 1)]
+        elif clean_c(idx + 1) in sr_map:
+            matched = sr_map[clean_c(idx + 1)]
 
         # 2. Match by location keyword overlap if not matched
         if not matched and entry.get('location'):
@@ -1033,7 +1146,7 @@ def merge_companion_excel(ppt_entries, companion_excel_path, column_mapping=None
         if not matched and idx < len(excel_entries):
             matched = excel_entries[idx]
 
-        # Apply matched fields (e.g. Availability, Latitude Longitude, Rate, etc.)
+        # Apply matched fields from Excel (Availability, Latitude Longitude, Rate, etc.)
         if matched:
             if matched.get('availability') and str(matched['availability']).strip():
                 entry['availability'] = str(matched['availability']).strip()
@@ -1041,7 +1154,7 @@ def merge_companion_excel(ppt_entries, companion_excel_path, column_mapping=None
                 entry['coords'] = str(matched['coords']).strip()
             if matched.get('rate') and str(matched['rate']).strip():
                 entry['rate'] = str(matched['rate']).strip()
-            if matched.get('city') and str(matched['city']).strip():
+            if matched.get('city') and str(matched['city']).strip() and (not entry.get('city') or entry['city'] == 'Ahmedabad'):
                 entry['city'] = str(matched['city']).strip()
             if matched.get('type') and str(matched['type']).strip():
                 entry['type'] = str(matched['type']).strip()
@@ -1049,7 +1162,7 @@ def merge_companion_excel(ppt_entries, companion_excel_path, column_mapping=None
                 entry['illum'] = str(matched['illum']).strip()
             if matched.get('size') and str(matched['size']).strip():
                 entry['size'] = str(matched['size']).strip()
-            if matched.get('location') and (not entry.get('location') or len(entry['location']) < 6 or 'prime city' in entry['location'].lower()):
+            if matched.get('location') and (not entry.get('location') or len(entry['location']) < 6 or 'prime' in entry['location'].lower() or 'site' in entry['location'].lower()):
                 entry['location'] = matched['location']
             entry['companion_matched'] = True
 
@@ -1173,8 +1286,8 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
     except Exception as exc:
         sys.stderr.write(f"[Master Excel Gen Error] {exc}\n")
 
-def generate_converted_pptx_pure(template_file, output_path, entries, is_excel=False):
-    """Generates the master template presentation with cloned slides and official software Terms & Conditions."""
+def generate_converted_pptx_pure(template_file, output_path, entries, is_excel=False, include_terms=True):
+    """Generates the master template presentation with cloned slides and optional official software Terms & Conditions."""
     with zipfile.ZipFile(template_file, 'r') as z_in:
         files = {f.filename: z_in.read(f.filename) for f in z_in.filelist}
 
@@ -1195,8 +1308,12 @@ def generate_converted_pptx_pure(template_file, output_path, entries, is_excel=F
     max_sldid = max(existing_sldids) if existing_sldids else 300
 
     n_sites = len(entries)
-    terms_slide_num = n_sites + 3
-    closing_slide_num = n_sites + 4
+    if include_terms:
+        terms_slide_num = n_sites + 3
+        closing_slide_num = n_sites + 4
+    else:
+        terms_slide_num = None
+        closing_slide_num = n_sites + 3
 
     closing_xml_data = files['ppt/slides/slide5.xml']
     closing_rels_data = files.get('ppt/slides/_rels/slide5.xml.rels')
@@ -1286,49 +1403,50 @@ def generate_converted_pptx_pure(template_file, output_path, entries, is_excel=F
         max_sldid += 1
         sld_id_list.append(f'<p:sldId id="{max_sldid}" r:id="{rid}"/>')
 
-    # 2. Generate Terms & Conditions Slide (Official Media Buzz Software Terms - Rule 7)
-    terms_slide_filename = f"ppt/slides/slide{terms_slide_num}.xml"
-    terms_rels_filename = f"ppt/slides/_rels/slide{terms_slide_num}.xml.rels"
+    # 2. Generate Terms & Conditions Slide (only if include_terms is True)
+    if include_terms and terms_slide_num:
+        terms_slide_filename = f"ppt/slides/slide{terms_slide_num}.xml"
+        terms_rels_filename = f"ppt/slides/_rels/slide{terms_slide_num}.xml.rels"
 
-    terms_xml = base_slide_xml_str
-    terms_xml = re.sub(r'(<a:t[^>]*>)Site\s*\d+(</a:t>)', r'\g<1>\g<2>', terms_xml, count=1)
-    terms_xml = terms_xml.replace('MB - 07', 'TERMS &amp; CONDITIONS')
-    terms_xml = terms_xml.replace('Ahmedabad', 'Terms &amp; Conditions')
-    terms_xml = terms_xml.replace('Shivranjani Bridge- Fcg. Shyamal 4 road Jnc - Left (1)', 'Media Buzz Outdoor Media Contract Terms')
-    
-    terms_xml = terms_xml.replace('Size:  ', '1. ')
-    terms_xml = terms_xml.replace('30x10 ft', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[0][3:]))
-    
-    terms_xml = terms_xml.replace('Type:  ', '2. ')
-    terms_xml = terms_xml.replace('Gantry', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[1][3:]))
-    
-    terms_xml = terms_xml.replace('Illumination:  ', '3. ')
-    terms_xml = terms_xml.replace('BL', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[2][3:]))
-    
-    terms_xml = terms_xml.replace('Adv.fee per month:  ', '4. ')
-    terms_xml = terms_xml.replace('₹ 2,25,000/-', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[3][3:]))
-    
-    terms_xml = terms_xml.replace('Availability:  ', '5. ')
-    terms_xml = terms_xml.replace('Booked till 30 Sept 2026', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[4][3:]))
-    
-    terms_xml = terms_xml.replace('Location Coordinates:  ', '6. ')
-    terms_xml = terms_xml.replace('23.018881, 72.530022', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[5][3:] + " " + OFFICIAL_SOFTWARE_TERMS[6]))
+        terms_xml = base_slide_xml_str
+        terms_xml = re.sub(r'(<a:t[^>]*>)Site\s*\d+(</a:t>)', r'\g<1>\g<2>', terms_xml, count=1)
+        terms_xml = terms_xml.replace('MB - 07', 'TERMS &amp; CONDITIONS')
+        terms_xml = terms_xml.replace('Ahmedabad', 'Terms &amp; Conditions')
+        terms_xml = terms_xml.replace('Shivranjani Bridge- Fcg. Shyamal 4 road Jnc - Left (1)', 'Media Buzz Outdoor Media Contract Terms')
+        
+        terms_xml = terms_xml.replace('Size:  ', '1. ')
+        terms_xml = terms_xml.replace('30x10 ft', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[0][3:]))
+        
+        terms_xml = terms_xml.replace('Type:  ', '2. ')
+        terms_xml = terms_xml.replace('Gantry', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[1][3:]))
+        
+        terms_xml = terms_xml.replace('Illumination:  ', '3. ')
+        terms_xml = terms_xml.replace('BL', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[2][3:]))
+        
+        terms_xml = terms_xml.replace('Adv.fee per month:  ', '4. ')
+        terms_xml = terms_xml.replace('₹ 2,25,000/-', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[3][3:]))
+        
+        terms_xml = terms_xml.replace('Availability:  ', '5. ')
+        terms_xml = terms_xml.replace('Booked till 30 Sept 2026', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[4][3:]))
+        
+        terms_xml = terms_xml.replace('Location Coordinates:  ', '6. ')
+        terms_xml = terms_xml.replace('23.018881, 72.530022', saxutils.escape(OFFICIAL_SOFTWARE_TERMS[5][3:] + " " + OFFICIAL_SOFTWARE_TERMS[6]))
 
-    files[terms_slide_filename] = terms_xml.encode('utf-8')
-    files[terms_rels_filename] = base_rels_xml_str.encode('utf-8')
+        files[terms_slide_filename] = terms_xml.encode('utf-8')
+        files[terms_rels_filename] = base_rels_xml_str.encode('utf-8')
 
-    content_types_str = content_types_str.replace(
-        '</Types>',
-        f'<Override PartName="/{terms_slide_filename}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>'
-    )
-    max_rid += 1
-    terms_rid = f"rId{max_rid}"
-    pres_rels_str = pres_rels_str.replace(
-        '</Relationships>',
-        f'<Relationship Id="{terms_rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide{terms_slide_num}.xml"/></Relationships>'
-    )
-    max_sldid += 1
-    sld_id_list.append(f'<p:sldId id="{max_sldid}" r:id="{terms_rid}"/>')
+        content_types_str = content_types_str.replace(
+            '</Types>',
+            f'<Override PartName="/{terms_slide_filename}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>'
+        )
+        max_rid += 1
+        terms_rid = f"rId{max_rid}"
+        pres_rels_str = pres_rels_str.replace(
+            '</Relationships>',
+            f'<Relationship Id="{terms_rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide{terms_slide_num}.xml"/></Relationships>'
+        )
+        max_sldid += 1
+        sld_id_list.append(f'<p:sldId id="{max_sldid}" r:id="{terms_rid}"/>')
 
     # 3. Generate Closing Slide
     closing_slide_filename = f"ppt/slides/slide{closing_slide_num}.xml"
@@ -1363,7 +1481,7 @@ def generate_converted_pptx_pure(template_file, output_path, entries, is_excel=F
             z_out.writestr(fname, data)
 
 
-def process_presentation_pure(input_path, output_path, template_file, mapping=None, sheet_name=None, companion_excel=None, manual_city=None, custom_name=None):
+def process_presentation_pure(input_path, output_path, template_file, mapping=None, sheet_name=None, companion_excel=None, manual_city=None, custom_name=None, include_terms=True):
     """Processes conversion for PPTX or Excel using pure Python standard library & OpenXML."""
     is_excel = input_path.lower().endswith(('.xlsx', '.xls'))
     headers_detected = []
@@ -1387,7 +1505,7 @@ def process_presentation_pure(input_path, output_path, template_file, mapping=No
     if not entries:
         raise ValueError("Could not extract any location or billboard listings from the uploaded file.")
         
-    generate_converted_pptx_pure(template_file, output_path, entries, is_excel=is_excel)
+    generate_converted_pptx_pure(template_file, output_path, entries, is_excel=is_excel, include_terms=include_terms)
 
     # Automatically generate standardized 11-column Master Excel workbook
     excel_output_path = re.sub(r'\.pptx$', '.xlsx', output_path, flags=re.IGNORECASE)
@@ -1433,26 +1551,27 @@ def process_presentation_pure(input_path, output_path, template_file, mapping=No
             'previewUrl': thumb_data
         })
 
-    # Append Terms & Conditions slide preview (Official software terms - Rule 7 & 9)
-    terms_thumb = generate_terms_slide_thumbnail()
-    slide_previews.append({
-        'siteNumber': 'Terms & Conditions',
-        'isTermsSlide': True,
-        'sourceSlide': 'Media Buzz Software',
-        'code': '',
-        'size': '',
-        'location': 'Official Media Buzz Software Terms & Conditions (7 Points)',
-        'city': 'All Markets',
-        'type': 'Terms',
-        'illum': 'Contract',
-        'rate': '7-Point Terms Preserved',
-        'availability': 'Official Policy',
-        'coords': '',
-        'hasPhoto': False,
-        'reviewNeeded': False,
-        'reviewFlags': [],
-        'previewUrl': terms_thumb
-    })
+    # Append Terms & Conditions slide preview only if terms are included
+    if include_terms:
+        terms_thumb = generate_terms_slide_thumbnail()
+        slide_previews.append({
+            'siteNumber': 'Terms & Conditions',
+            'isTermsSlide': True,
+            'sourceSlide': 'Media Buzz Software',
+            'code': '',
+            'size': '',
+            'location': 'Official Media Buzz Software Terms & Conditions (7 Points)',
+            'city': 'All Markets',
+            'type': 'Terms',
+            'illum': 'Contract',
+            'rate': '7-Point Terms Preserved',
+            'availability': 'Official Policy',
+            'coords': '',
+            'hasPhoto': False,
+            'reviewNeeded': False,
+            'reviewFlags': [],
+            'previewUrl': terms_thumb
+        })
         
     return {
         'success': True,
@@ -1461,10 +1580,11 @@ def process_presentation_pure(input_path, output_path, template_file, mapping=No
         'manualCityApplied': bool(manual_city and str(manual_city).strip()),
         'manualCity': manual_city or None,
         'excelGenerated': excel_generated,
-        'softwareTermsVerified': True,
+        'softwareTermsVerified': include_terms,
+        'termsIncluded': include_terms,
         'message': 'Successfully converted into Media Buzz Master Template format.',
         'processedSlides': len(entries),
-        'totalSlidesInFile': len(entries) + 4, # Cover 1, Cover 2, N sites, Terms, Closing
+        'totalSlidesInFile': len(entries) + (4 if include_terms else 3), # Cover 1, Cover 2, N sites, [Terms], Closing
         'templateUsed': os.path.basename(template_file),
         'headers': headers_detected,
         'mapping': mapping_used,
@@ -1743,7 +1863,7 @@ def process_presentation_pptx(input_path, output_path, template_file):
         'slides': slide_previews
     }
 
-def process_presentation(input_path, output_path, master_template_path=None, mapping=None, sheet_name=None, companion_excel=None, manual_city=None, custom_name=None):
+def process_presentation(input_path, output_path, master_template_path=None, mapping=None, sheet_name=None, companion_excel=None, manual_city=None, custom_name=None, include_terms=True):
     """
     Main conversion entrypoint.
     Executes zero-dependency OpenXML engine ensuring 100% valid PowerPoint files.
@@ -1760,7 +1880,8 @@ def process_presentation(input_path, output_path, master_template_path=None, map
         input_path, output_path, template_file,
         mapping=mapping, sheet_name=sheet_name,
         companion_excel=companion_excel, manual_city=manual_city,
-        custom_name=custom_name
+        custom_name=custom_name,
+        include_terms=include_terms
     )
 
 
@@ -1776,6 +1897,7 @@ def main():
     parser.add_argument('--companion-excel', type=str, help="Optional companion Excel workbook to extract availability, coordinates, rates, etc.")
     parser.add_argument('--manual-city', type=str, help="Manual city override or default city")
     parser.add_argument('--custom-name', type=str, help="Custom name for output presentation and Excel")
+    parser.add_argument('--no-terms', action='store_true', help="Omit Terms & Conditions slide from output presentation")
     args = parser.parse_args()
     
     if args.check_template:
@@ -1825,7 +1947,8 @@ def main():
             sheet_name=args.sheet,
             companion_excel=args.companion_excel,
             manual_city=args.manual_city,
-            custom_name=args.custom_name
+            custom_name=args.custom_name,
+            include_terms=not args.no_terms
         )
         # Write full result file to disk to prevent stdout buffer overflow
         result_json_path = args.output + '.json'

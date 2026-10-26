@@ -137,8 +137,8 @@ export default function ExcelConverterView() {
       if (res.data?.activeSheet) {
         setSelectedSheet(res.data.activeSheet);
       }
-      // If headers do not match master Jade Blue template, show mapping modal
-      if (res.data?.matchesMaster === false) {
+      // Only prompt mapping modal if location column could not be automatically detected
+      if (res.data?.mapping && !res.data.mapping.location) {
         setShowMappingModal(true);
       }
     } catch (err) {
@@ -762,7 +762,7 @@ export default function ExcelConverterView() {
                   {conversionResult.processedSlides} Billboard Sites Converted from Excel
                 </h3>
                 <p style={{ margin: 0, color: 'var(--mb-muted)', fontSize: '12px' }}>
-                  Official 16:9 widescreen layout with verified software Terms & Conditions.
+                  Official 16:9 widescreen layout without unnecessary terms slide.
                   {conversionResult.manualCity && (
                     <span style={{ color: '#4ade80', marginLeft: '6px' }}>
                       City: <strong>{conversionResult.manualCity}</strong>.
@@ -829,7 +829,7 @@ export default function ExcelConverterView() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
               <div>
                 <h3 style={{ margin: '0 0 2px', color: '#fff' }}>Slide Deck & Site Cards ({slides.length})</h3>
-                <span className="scooh-footnote">Includes Title Covers, Billboard Sites, Terms & Conditions, and Closing Slide</span>
+                <span className="scooh-footnote">Includes Title Covers, Billboard Sites, and Closing Slide (No Terms Slide)</span>
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button
