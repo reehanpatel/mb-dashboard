@@ -846,6 +846,54 @@ def generate_terms_slide_thumbnail():
             pass
     return None
 
+def is_cover_or_advertising_slide(full_text, pos, total_slides, has_photo=False, has_size=False):
+    """
+    Identifies whether a slide in an uploaded presentation is an advertising/cover page
+    at the beginning (page 1) or end (last page) rather than an actual billboard site listing.
+    Strictly only evaluates page 1 and the last page, keeping all middle site slides as is.
+    """
+    if total_slides <= 1:
+        return False
+
+    # User rule: ONLY remove advertising pages 1 and last page. Middle slides must NOT be removed.
+    if pos != 1 and pos != total_slides:
+        return False
+
+    t_lower = (full_text or '').lower().strip()
+
+    # 1. Closing / contact / thank you indicators (typical for last advertising page)
+    closing_kws = [
+        'thank you', 'thanks', 'contact us', 'get in touch', 'reach us', 'head office',
+        'branch office', 'mediabuzzoutdoor.com', 'looking forward', 'end of presentation',
+        'queries', 'connect with us', 'for bookings', 'contact details', 'call us',
+        'email us', 'toll free', 'registered office', 'corporate office', 'contact',
+        'thank u', 'thanks for watching', 'thanks & regards'
+    ]
+
+    # 2. Cover / presentation title / intro advertising indicators (typical for first advertising page)
+    cover_kws = [
+        'proposal', 'media plan', 'presentation', 'ooh proposal', 'media campaign',
+        'outdoor advertising', 'billboard proposal', 'agency profile', 'company profile',
+        'prepared for', 'submitted by', 'submitted to', 'be seen', 'all rights reserved',
+        'advertising solutions', 'media solutions', 'outdoor media plan', 'advertising',
+        'ooh plan', 'outdoor plan', 'hoarding proposal', 'campaign proposal',
+        'ooh', 'billboard', 'hoarding', 'branding', 'agency', 'welcome', 'credentials',
+        'profile', 'deck', 'portfolio', 'overview', 'introduction'
+    ]
+
+    # First slide (Page 1) - remove advertising cover page if it has cover keywords, lacks photo, or lacks billboard size
+    if pos == 1 and total_slides >= 2:
+        if any(kw in t_lower for kw in cover_kws) or any(kw in t_lower for kw in closing_kws) or not has_photo or not has_size:
+            return True
+
+    # Last slide (Slide N) - remove advertising closing page if it has closing keywords, cover keywords, lacks photo, or lacks billboard size
+    if pos == total_slides and total_slides >= 2:
+        if any(kw in t_lower for kw in closing_kws) or any(kw in t_lower for kw in cover_kws) or not has_photo or not has_size:
+            return True
+
+    return False
+
+
 # ==============================================================================
 # Pure Python Standard Library Engine (Zero Dependencies, Works Everywhere)
 # ==============================================================================
@@ -855,36 +903,46 @@ def extract_entries_pure_zip(input_path):
     entries = []
     with zipfile.ZipFile(input_path, 'r') as z_in:
         namelist = set(z_in.namelist())
-        slide_files = []
-        for name in namelist:
-            m = re.match(r'^ppt/slides/slide(\d+)\.xml$', name)
-            if m:
-                slide_files.append((int(m.group(1)), name))
-        slide_files.sort(key=lambda x: x[0])
-        
-        for slide_idx, slide_name in slide_files:
+
+        # Read actual presentation slide display order from ppt/presentation.xml if available
+        ordered_slide_names = []
+        if 'ppt/presentation.xml' in namelist and 'ppt/_rels/presentation.xml.rels' in namelist:
+            try:
+                pres_xml = z_in.read('ppt/presentation.xml').decode('utf-8', errors='ignore')
+                pres_rels = z_in.read('ppt/_rels/presentation.xml.rels').decode('utf-8', errors='ignore')
+                rid_to_target = dict(re.findall(r'<Relationship[^>]*Id="([^"]+)"[^>]*Target="([^"]+)"', pres_rels))
+                for rid, tgt in re.findall(r'<Relationship[^>]*Target="([^"]+)"[^>]*Id="([^"]+)"', pres_rels):
+                    rid_to_target[rid] = tgt
+                for rid in re.findall(r'<p:sldId[^>]*r:id="([^"]+)"', pres_xml):
+                    target = rid_to_target.get(rid, '')
+                    if target:
+                        clean_target = 'ppt/' + target.replace('../', '').lstrip('/')
+                        if clean_target in namelist:
+                            m_idx = re.search(r'slide(\d+)\.xml', clean_target)
+                            s_num = int(m_idx.group(1)) if m_idx else len(ordered_slide_names) + 1
+                            ordered_slide_names.append((s_num, clean_target))
+            except Exception:
+                ordered_slide_names = []
+
+        if not ordered_slide_names:
+            slide_files_raw = []
+            for name in namelist:
+                m = re.match(r'^ppt/slides/slide(\d+)\.xml$', name)
+                if m:
+                    slide_files_raw.append((int(m.group(1)), name))
+            slide_files_raw.sort(key=lambda x: x[0])
+            ordered_slide_names = slide_files_raw
+
+        total_slides = len(ordered_slide_names)
+
+        for pos, (slide_idx, slide_name) in enumerate(ordered_slide_names, start=1):
             slide_xml = z_in.read(slide_name).decode('utf-8', errors='ignore')
             rels_name = f"ppt/slides/_rels/{os.path.basename(slide_name)}.rels"
-            
+
             # Extract text elements: <a:t>...</a:t>
             texts = re.findall(r'<a:t[^>]*>(.*?)</a:t>', slide_xml)
             full_text = ' '.join(t.strip() for t in texts if t.strip())
-            
-            # Skip pure closing / contact / thank you slides
-            if full_text.lower() in ['mediabuzzoutdoor.com', 'thank you', 'thanks', 'contact us', 'thank you!']:
-                continue
-                
-            size = extract_size(full_text)
-            city = detect_city(full_text)
-            site_num_label = f"Site {len(entries) + 1}"
-            code_detected = extract_code(full_text, len(entries) + 1)
-            loc = clean_location(full_text, size_str=size, code_str=code_detected, city_str=city)
-            mtype = detect_media_type(full_text)
-            illum = detect_illumination(full_text)
-            rate = detect_rate(full_text)
-            avail = detect_availability(full_text)
-            coords = ""  # No coordinates in converted presentation for PPT conversion
-            
+
             # Find photo in slide rels
             photo_bytes = None
             if rels_name in namelist:
@@ -892,7 +950,7 @@ def extract_entries_pure_zip(input_path):
                 img_targets = re.findall(r'Type="[^"]*relationships/image"\s+Target="([^"]+)"', rels_xml)
                 if not img_targets:
                     img_targets = re.findall(r'Target="([^"]+)"\s+Type="[^"]*relationships/image"', rels_xml)
-                
+
                 best_bytes = None
                 max_size = 0
                 for tgt in img_targets:
@@ -906,10 +964,27 @@ def extract_entries_pure_zip(input_path):
                             max_size = len(data)
                             best_bytes = data
                 photo_bytes = best_bytes
-                
+
+            size = extract_size(full_text)
+
+            # Rule: Remove first and last advertising pages, keeping only genuine billboard site slides
+            if is_cover_or_advertising_slide(full_text, pos, total_slides, has_photo=bool(photo_bytes), has_size=bool(size)):
+                continue
+
+            city = detect_city(full_text)
+            site_num = len(entries) + 1
+            site_num_label = f"Site {site_num}"
+            code_detected = extract_code(full_text, site_num)
+            loc = clean_location(full_text, size_str=size, code_str=code_detected, city_str=city)
+
             if not photo_bytes and not size and (not loc or len(loc) < 5):
                 continue
-                
+
+            mtype = detect_media_type(full_text)
+            illum = detect_illumination(full_text)
+            rate = detect_rate(full_text)
+            avail = detect_availability(full_text)
+
             review_flags = []
             if not photo_bytes:
                 review_flags.append("Photo missing or not detected")
@@ -917,11 +992,12 @@ def extract_entries_pure_zip(input_path):
                 review_flags.append("Dimensions/size missing")
             if not loc or len(loc) < 3:
                 review_flags.append("Location description unclear")
-                
+
             entries.append({
                 'source_slide': slide_idx,
                 'photo_bytes': photo_bytes,
                 'code': site_num_label,
+                'site_number': site_num,
                 'size': size or '30x10 ft',
                 'location': loc or 'Prime City Location',
                 'city': city or 'Ahmedabad',
@@ -933,7 +1009,7 @@ def extract_entries_pure_zip(input_path):
                 'review_needed': len(review_flags) > 0,
                 'review_flags': review_flags
             })
-            
+
     return entries
 
 # ==============================================================================
@@ -1523,7 +1599,7 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
         title_cell = ws['A1']
         title_cell.value = (title or "MEDIA BUZZ - SITES SPECIFICATION").upper()
         title_cell.font = Font(name='Calibri', size=13, bold=True, color='1E293B')
-        title_cell.alignment = Alignment(horizontal='center', vertical='middle')
+        title_cell.alignment = Alignment(horizontal='center', vertical='center')
         title_cell.fill = PatternFill(start_color='F1F5F9', end_color='F1F5F9', fill_type='solid')
         ws.row_dimensions[1].height = 32
 
@@ -1550,7 +1626,7 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
             cell.font = header_font
             cell.border = thin_border
             align_h = 'center' if col_idx in [1, 2, 4, 5, 6, 7, 8, 9] else ('right' if col_idx == 10 else 'left')
-            cell.alignment = Alignment(horizontal=align_h, vertical='middle')
+            cell.alignment = Alignment(horizontal=align_h, vertical='center')
 
         # Row 3+: Data rows
         data_font = Font(name='Calibri', size=10.5)
@@ -1595,7 +1671,7 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
                 cell.font = data_font
                 cell.border = data_border
                 align_h = 'center' if col_idx in [1, 2, 4, 5, 6, 7, 8, 9] else ('right' if col_idx == 10 else 'left')
-                cell.alignment = Alignment(horizontal=align_h, vertical='middle')
+                cell.alignment = Alignment(horizontal=align_h, vertical='center')
 
         # Auto-adjust column widths
         col_widths = {1: 8, 2: 16, 3: 45, 4: 15, 5: 10, 6: 8, 7: 8, 8: 12, 9: 20, 10: 20, 11: 28}
@@ -1948,6 +2024,7 @@ def process_presentation_pptx(input_path, output_path, template_file):
     closing_sldId = out_prs.slides._sldIdLst[len(out_prs.slides) - 1]
     
     entries = []
+    total_slides = len(in_prs.slides)
     for i, slide in enumerate(in_prs.slides):
         all_texts = []
         for sh in slide.shapes:
@@ -1964,19 +2041,6 @@ def process_presentation_pptx(input_path, output_path, template_file):
         full_text = ' '.join(all_texts).strip()
         slide_w_in = in_prs.slide_width / 914400
         slide_h_in = in_prs.slide_height / 914400
-        
-        if full_text.lower() in ['mediabuzzoutdoor.com', 'thank you', 'thanks', 'contact us', 'thank you!']:
-            continue
-            
-        code = extract_code(full_text, len(entries) + 1)
-        size = extract_size(full_text)
-        city = detect_city(full_text)
-        loc = clean_location(full_text, size, code, city)
-        mtype = detect_media_type(full_text)
-        illum = detect_illumination(full_text)
-        rate = detect_rate(full_text)
-        avail = detect_availability(full_text)
-        coords = detect_coords(full_text)
 
         best_pic = None
         max_area = 0
@@ -1990,10 +2054,28 @@ def process_presentation_pptx(input_path, output_path, template_file):
                 if area > max_area and area > 2.0:
                     max_area = area
                     best_pic = sh
-                    
+
+        size = extract_size(full_text)
+        pos = i + 1
+
+        # Rule: Remove first and last advertising pages, keeping only genuine billboard site slides
+        if is_cover_or_advertising_slide(full_text, pos, total_slides, has_photo=bool(best_pic), has_size=bool(size)):
+            continue
+
+        site_num = len(entries) + 1
+        site_num_label = f"Site {site_num}"
+        city = detect_city(full_text)
+        code_detected = extract_code(full_text, site_num)
+        loc = clean_location(full_text, size_str=size, code_str=code_detected, city_str=city)
+
         if not best_pic and not size and (not loc or len(loc) < 5):
             continue
-        
+
+        mtype = detect_media_type(full_text)
+        illum = detect_illumination(full_text)
+        rate = detect_rate(full_text)
+        avail = detect_availability(full_text)
+
         review_flags = []
         if not best_pic:
             review_flags.append("Photo missing or not detected")
@@ -2012,7 +2094,8 @@ def process_presentation_pptx(input_path, output_path, template_file):
         entries.append({
             'source_slide': i + 1,
             'photo_bytes': photo_bytes,
-            'code': code,
+            'code': site_num_label,
+            'site_number': site_num,
             'size': size or '30x10 ft',
             'location': loc or 'Prime City Location',
             'city': city or 'Ahmedabad',
