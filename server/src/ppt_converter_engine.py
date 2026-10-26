@@ -383,52 +383,79 @@ def detect_city(text):
     return 'Ahmedabad'
 
 def clean_location(text, size_str=None, code_str=None, city_str=None):
-    s = text
-    # 1. Remove explicit prefixes/labels
+    if not text:
+        return f"Near {city_str} Hub" if city_str else "Prime Billboard Location"
+    s = str(text)
+
+    # 1. Remove all site codes, IDs, serial numbers: MB-01, SITE 1, LOC-2, AMD-001, CODE: 101, SR NO 1, S.NO. 5, etc.
+    s = re.sub(r'(?i)\b(?:sr\.?\s*no\.?|s\.?\s*no\.?|sl\.?\s*no\.?|site\s*(?:no\.?|#|code)?|spot\s*#?|code\s*no\.?|code|id|ref|h-no|panel|billboard|hoarding|unipole|item|seq|no\.?)[\s.:#\-–—]*\d+\b', ' ', s)
+    s = re.sub(r'(?i)\b(?:mb|site|loc|spot|amd|srt|bar|raj|surat|ahmedabad|gantry|hoarding|unipole)[\s#\-–—]*\d+\b', ' ', s)
+    s = re.sub(r'\b[A-Za-z]{1,6}\s*[-–—/]\s*\d{1,6}\b', ' ', s)
+    s = re.sub(r'[\(\[]\s*#?\d+\s*[\)\]]', ' ', s)  # e.g. (1), (01), [2]
+    if code_str:
+        s = re.sub(re.escape(str(code_str)), ' ', s, flags=re.IGNORECASE)
+
+    # 2. Remove all dates: 25.10.2026, 25/10/2026, 25-10-2026, 2026-10-25, 30 Sept 2026, 25th Oct, October 2026, etc.
+    s = re.sub(r'\b\d{1,2}[./\-]\d{1,2}[./\-]\d{2,4}\b', ' ', s)
+    s = re.sub(r'\b\d{4}[./\-]\d{1,2}[./\-]\d{1,2}\b', ' ', s)
+    s = re.sub(r'(?i)\b\d{1,2}(?:st|nd|rd|th)?\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\s+\d{2,4})?\b', ' ', s)
+    s = re.sub(r'(?i)\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s*[-/]?\s*\d{2,4}\b', ' ', s)
+    s = re.sub(r'(?i)\b(?:vacant\s*date|vacant\s*from|available\s*from|available\s*till|booked\s*till|valid\s*till|w\.?e\.?f\.?|date|dated|dt)[\s.:\-–—]*[A-Za-z0-9./\- ]+\b', ' ', s)
+    s = re.sub(r'(?i)\b(date|dated|dt|w\.?e\.?f\.?|vacant\s*from|available\s*from|available\s*till|booked\s*till|valid\s*till)\b', ' ', s)
+
+    # 3. Remove explicit prefixes/labels
     s = re.sub(r'(?i)\b(location|address|site\s*(?:code|no|#)?|size|dimension[s]?|media(?:\s*type)?|type|illum(?:ination)?|lighting|rate|adv\.?\s*(?:fee|cost)|cost|rental|avail(?:ability)?|coordinates?|latitude|longitude|lat|long|gps|facing|traffic)\s*[:\-–—]?\b', ' ', s)
-    # 2. Remove any site codes: MB-01, SITE 1, LOC-2, AMD-001, etc.
-    s = re.sub(r'(?i)\b(?:mb|site|loc|spot|amd|gantry|hoarding|unipole)[\s#\-–—]*\d+\b', ' ', s)
-    # 3. Remove sizes & dimensions: 30x10, 40*20 ft, 1500 sq ft, etc.
+
+    # 4. Remove sizes & dimensions: 30x10, 40*20 ft, 1500 sq ft, etc.
     s = re.sub(r'\b\d{1,4}(?:\.\d+)?\s*[xX*×]\s*\d{1,4}(?:\.\d+)?(?:\s*(?:ft|feet|FT|m|meter|M|sq\.?\s*ft|sqft))?\b', ' ', s)
     s = re.sub(r'(?i)\b\d{2,6}\s*(?:sq\.?\s*ft|sqft|feet)\b', ' ', s)
     if size_str:
-        s = re.sub(re.escape(size_str), ' ', s, flags=re.IGNORECASE)
-    if code_str:
-        s = re.sub(re.escape(code_str), ' ', s, flags=re.IGNORECASE)
-    # 4. Remove rates and rate terms
+        s = re.sub(re.escape(str(size_str)), ' ', s, flags=re.IGNORECASE)
+
+    # 5. Remove rates and rate terms
     s = re.sub(r'(?i)(?:₹|rs\.?|inr)\s*[\d,]+(?:\s*/-|\s*per\s*month)?', ' ', s)
     s = re.sub(r'\b\d{1,3}(?:,\d{2,3})+(?:\s*/-)?\b', ' ', s)
     s = re.sub(r'(?i)\b(per\s*month|per\s*day|\bp\.?m\.?\b|rental|adv\.?\s*(?:fee|cost)?|fee|fees|cost|rate)\b', ' ', s)
-    # 5. Remove media types and illumination words
+
+    # 6. Remove media types and illumination words
     s = re.sub(r'(?i)\b(hoarding|unipole|gantry|cantilever|bridge\s*panel|fob|kiosk|digital|dooh|led|billboard)\b', ' ', s)
     s = re.sub(r'(?i)\b(front\s*lit|back\s*lit|non\s*lit|\bbl\b|\bfl\b|\bnl\b)\b', ' ', s)
-    # 6. Remove coordinates
+
+    # 7. Remove coordinates
     s = re.sub(r'\b\d{1,2}\.\d{4,8}\s*,\s*\d{1,2}\.\d{4,8}\b', ' ', s)
-    # 7. Remove common status words
+
+    # 8. Remove common status words
     s = re.sub(r'(?i)\b(available(?:\s+from|\s+till|\s+now)?|booked(?:\s+till)?|ready\s+to\s+book)\b', ' ', s)
-    # 8. Remove brand names & slogans
+
+    # 9. Remove brand names & slogans
     s = re.sub(r'(?i)\b(mediabuzz|outdoor|be seen|all rights reserved)\b', ' ', s)
-    # 9. Clean up whitespace and punctuation
+
+    # 10. Clean up whitespace and punctuation
     s = re.sub(r'[\r\n\t]+', ' ', s)
+    s = re.sub(r'^\s*#?\d+[\s.,;:/\-–—|]+', ' ', s)
+    s = re.sub(r'[\s.,;:/\-–—|]+#?\d+\s*$', ' ', s)
     s = re.sub(r'\s*[,;:\-–—|/]+\s*', ', ', s)
-    s = re.sub(r'^\s*\d+[\s.\-–—]+', '', s)
-    s = re.sub(r'\s+', ' ', s).strip(', -–—:')
-    # 10. Remove duplicate consecutive words (e.g. 'Ahmedabad Ahmedabad' -> 'Ahmedabad')
+    s = re.sub(r'(?:,\s*)+', ', ', s)
+    s = re.sub(r'^\s*#?\d+[\s.,;:/\-–—|]+', '', s)
+    s = re.sub(r'[\s.,;:/\-–—|]+#?\d+\s*$', '', s)
+    s = re.sub(r'\s+', ' ', s).strip(' ,.-–—:;|/')
+
+    # 11. Remove duplicate consecutive words
     words = s.split()
     dedup = []
     for w in words:
         clean_w = re.sub(r'^[^\w]+|[^\w]+$', '', w).lower()
         if not dedup or clean_w != re.sub(r'^[^\w]+|[^\w]+$', '', dedup[-1]).lower():
             dedup.append(w)
-    res = ' '.join(dedup).strip(', -–—:')
-    res = re.sub(r'^\d+[\s.\-–—]+', '', res).strip(', -–—:')
-    # 11. If city repeated at the very end, remove it
+    res = ' '.join(dedup).strip(' ,.-–—:;|/')
+    res = re.sub(r'^\s*#?\d+[\s.,;:/\-–—|]+', '', res)
+    res = re.sub(r'[\s.,;:/\-–—|]+#?\d+\s*$', '', res)
+    res = res.strip(' ,.-–—:;|/')
+
+    # 12. If city repeated at the very end, remove it
     if city_str and res.lower().endswith(city_str.lower()):
-        res = re.sub(r'(?i),\s*' + re.escape(city_str) + r'$', '', res).strip(', -–—:')
+        res = re.sub(r'(?i),\s*' + re.escape(city_str) + r'$', '', res).strip(' ,.-–—:;|/')
     return res[:120] if res else (f"Near {city_str} Hub" if city_str else "Prime Billboard Location")
-
-
-
 
 def detect_media_type(text):
     types = [
@@ -478,7 +505,7 @@ def detect_coords(text):
     m2 = re.search(r'\b(\d{1,2}\.\d{4,8}\s*,\s*\d{1,2}\.\d{4,8})\b', text)
     if m2:
         return re.sub(r'\s+', ' ', m2.group(1).strip())
-    return '23.012345, 72.567890'
+    return ""
 
 # 1x1 dark gray (#111111) PNG base64 fallback when PIL is not installed
 _DARK_PIXEL_PNG = (
@@ -577,9 +604,10 @@ def generate_slide_thumbnail(photo_bytes, site_num, code, size, location, city="
                 ("Type:", mtype or ""),
                 ("Illumination:", illum or ""),
                 ("Adv.fee per month:", rate or ""),
-                ("Availability:", avail or ""),
-                ("Location Coordinates:", coords or "")
+                ("Availability:", avail or "")
             ]
+            if coords:
+                fields.append(("Location Coordinates:", coords))
             
             fy = 192
             for label, val in fields:
@@ -671,12 +699,13 @@ def extract_entries_pure_zip(input_path):
             size = extract_size(full_text)
             city = detect_city(full_text)
             site_num_label = f"Site {len(entries) + 1}"
-            loc = clean_location(full_text, size, None, city)
+            code_detected = extract_code(full_text, len(entries) + 1)
+            loc = clean_location(full_text, size_str=size, code_str=code_detected, city_str=city)
             mtype = detect_media_type(full_text)
             illum = detect_illumination(full_text)
             rate = detect_rate(full_text)
             avail = detect_availability(full_text)
-            coords = detect_coords(full_text)
+            coords = ""  # No coordinates in converted presentation for PPT conversion
             
             # Find photo in slide rels
             photo_bytes = None
@@ -722,7 +751,7 @@ def extract_entries_pure_zip(input_path):
                 'illum': illum or 'BL',
                 'rate': rate or 'On Request',
                 'availability': avail or 'Available',
-                'coords': coords or '23.012345, 72.567890',
+                'coords': "",
                 'review_needed': len(review_flags) > 0,
                 'review_flags': review_flags
             })
@@ -1013,8 +1042,8 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
 
         rate_str = format_inr(rate_val) if rate_val else ""
 
-        # Clean location without altering actual listing information
-        cleaned_loc = clean_location(loc, size_str, city_str=city) if loc else ""
+        # Clean location without altering actual listing information (remove site codes and dates)
+        cleaned_loc = clean_location(loc, size_str=size_str, code_str=code_val or code_str, city_str=city) if loc else ""
 
         review_flags = []
         photo_bytes = row_images.get(r)
@@ -1140,6 +1169,7 @@ def inspect_excel(excel_path, sheet_name=None, column_mapping=None):
             media = 'Hoarding'
 
         rate_str = format_inr(rate_val) if rate_val else ""
+        cleaned_loc = clean_location(loc, size_str=size_str, code_str=code_val, city_str=city) if loc else ""
 
         total_sites += 1
         if len(sample_rows) < 5:
@@ -1147,7 +1177,7 @@ def inspect_excel(excel_path, sheet_name=None, column_mapping=None):
                 'row': r,
                 'sr_no': sr_no or (code_val or str(total_sites)),
                 'city': city,
-                'location': loc,
+                'location': cleaned_loc or loc,
                 'media': media or 'Hoarding',
                 'light': light or 'BL',
                 'size': size_str,
@@ -1466,8 +1496,16 @@ def generate_converted_pptx_pure(template_file, output_path, entries, is_excel=F
         slide_xml = slide_xml.replace('Gantry', saxutils.escape(mtype))
         slide_xml = slide_xml.replace('BL', saxutils.escape(illum))
         slide_xml = slide_xml.replace('₹ 2,25,000/-', saxutils.escape(rate))
-        slide_xml = slide_xml.replace('Booked till 30 Sept 2026', saxutils.escape(avail))
-        slide_xml = slide_xml.replace('23.018881, 72.530022', saxutils.escape(coords))
+        # Rule: In PPT conversion (or when coords is empty), omit coordinates completely from presentation
+        if not is_excel or not coords:
+            slide_xml = re.sub(
+                r'<a:p[ >](?:(?!<a:p[ >]).)*?Location Coordinates:(?:(?!<a:p[ >]).)*?</a:p>',
+                '',
+                slide_xml,
+                flags=re.DOTALL
+            )
+        else:
+            slide_xml = slide_xml.replace('23.018881, 72.530022', saxutils.escape(coords))
 
         photo_bytes = entry.get('photo_bytes')
         if photo_bytes:
@@ -1774,7 +1812,7 @@ def process_presentation_pptx(input_path, output_path, template_file):
             'illum': illum or 'BL',
             'rate': rate or 'On Request',
             'availability': avail or 'Available',
-            'coords': coords or '23.012345, 72.567890',
+            'coords': "",
             'review_needed': len(review_flags) > 0,
             'review_flags': review_flags
         })
@@ -1894,7 +1932,10 @@ def process_presentation_pptx(input_path, output_path, template_file):
                 elif t.startswith('Availability:'):
                     set_spec_paragraph(p, 'Availability', avail_text)
                 elif t.startswith('Location Coordinates:'):
-                    set_spec_paragraph(p, 'Location Coordinates', coords_text)
+                    if not coords_text:
+                        p.text = ""
+                    else:
+                        set_spec_paragraph(p, 'Location Coordinates', coords_text)
 
     for idx in range(n_entries):
         site_num = idx + 1
