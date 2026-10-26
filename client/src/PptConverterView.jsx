@@ -12,6 +12,20 @@ const OFFICIAL_SOFTWARE_TERMS = [
   "7. Cancellations require a minimum 10 days' notice; immediate cancellations are not accepted."
 ];
 
+const MASTER_TARGET_FIELDS = [
+  { key: 'sr_no', label: 'Serial / Site No', masterCol: 'SR NO', required: false, desc: 'Site sequence number (e.g. 1, 2, 3...)' },
+  { key: 'city', label: 'City', masterCol: 'City', required: false, desc: 'City name (e.g. Ahmedabad, Surat)' },
+  { key: 'location', label: 'Location / Address', masterCol: 'LOCATION', required: true, desc: 'Prime location or billboard address' },
+  { key: 'media', label: 'Media Type', masterCol: 'MEDIA', required: false, desc: 'Unipole, Hoarding, Gantry, etc.' },
+  { key: 'light', label: 'Illumination', masterCol: 'LIGHT', required: false, desc: 'BL, FL, NL (Backlit, Frontlit, Non-lit)' },
+  { key: 'w', label: 'Width (W)', masterCol: 'W', required: false, desc: 'Width in feet' },
+  { key: 'h', label: 'Height (H)', masterCol: 'H', required: false, desc: 'Height in feet' },
+  { key: 'sq_ft', label: 'Total Sq Ft', masterCol: 'SQ FT', required: false, desc: 'Calculated area in square feet' },
+  { key: 'avail', label: 'Availability', masterCol: 'AVAILABLITY', required: false, desc: 'Available or Booked till date' },
+  { key: 'rate', label: 'Selling Amount', masterCol: 'Selling Amount', required: false, desc: 'Monthly advertising fee (INR)' },
+  { key: 'coords', label: 'Location Coordinates', masterCol: 'Latitude Longitude', required: false, desc: 'GPS Lat, Lng coordinates' }
+];
+
 const POPULAR_CITIES = ['Ahmedabad', 'Surat', 'Vadodara', 'Rajkot', 'Gandhinagar', 'Mumbai', 'Pune', 'Delhi NCR'];
 
 export default function PptConverterView() {
@@ -31,8 +45,13 @@ export default function PptConverterView() {
   const pptInputRef = useRef(null);
   const templateInputRef = useRef(null);
 
-  // Companion Excel File
+  // Companion Excel File & Mapping State
   const [companionExcelFile, setCompanionExcelFile] = useState(null);
+  const [companionInspection, setCompanionInspection] = useState(null);
+  const [companionColumnMapping, setCompanionColumnMapping] = useState({});
+  const [companionSelectedSheet, setCompanionSelectedSheet] = useState('');
+  const [inspectingCompanion, setInspectingCompanion] = useState(false);
+  const [showCompanionMappingModal, setShowCompanionMappingModal] = useState(false);
   const companionInputRef = useRef(null);
 
   // Manual inputs
@@ -119,6 +138,50 @@ export default function PptConverterView() {
     }
   };
 
+  const inspectCompanionExcel = async (selectedFile, targetSheet = null, customMap = null) => {
+    try {
+      setInspectingCompanion(true);
+      const fd = new FormData();
+      fd.append('file', selectedFile);
+      const sheetToUse = targetSheet !== null ? targetSheet : companionSelectedSheet;
+      if (sheetToUse) {
+        fd.append('sheetName', sheetToUse);
+      }
+      const mapToUse = customMap !== null ? customMap : companionColumnMapping;
+      if (mapToUse && Object.keys(mapToUse).length > 0) {
+        fd.append('columnMapping', JSON.stringify(mapToUse));
+      }
+      const res = await api.post('/ppt-converter/inspect-excel', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+      setCompanionInspection(res.data);
+      if (res.data?.mapping) {
+        setCompanionColumnMapping(res.data.mapping);
+      }
+      if (res.data?.activeSheet) {
+        setCompanionSelectedSheet(res.data.activeSheet);
+      }
+    } catch (err) {
+      console.warn('Companion Excel inspection note:', err.message);
+    } finally {
+      setInspectingCompanion(false);
+    }
+  };
+
+  const handleCompanionSheetChange = (newSheet) => {
+    setCompanionSelectedSheet(newSheet);
+    if (companionExcelFile) {
+      inspectCompanionExcel(companionExcelFile, newSheet, {});
+    }
+  };
+
+  const handleCompanionApplyCustomMapping = () => {
+    setShowCompanionMappingModal(false);
+    if (companionExcelFile) {
+      inspectCompanionExcel(companionExcelFile, companionSelectedSheet, companionColumnMapping);
+    }
+  };
+
   const handleCompanionExcelChange = (e) => {
     if (e.target.files && e.target.files[0]) {
       const selected = e.target.files[0];
@@ -128,6 +191,7 @@ export default function PptConverterView() {
         return;
       }
       setCompanionExcelFile(selected);
+      inspectCompanionExcel(selected);
     }
   };
 
@@ -169,6 +233,12 @@ export default function PptConverterView() {
       fd.append('file', pptFile);
       if (companionExcelFile) {
         fd.append('excelFile', companionExcelFile);
+        if (companionColumnMapping && Object.keys(companionColumnMapping).length > 0) {
+          fd.append('columnMapping', JSON.stringify(companionColumnMapping));
+        }
+        if (companionSelectedSheet) {
+          fd.append('sheetName', companionSelectedSheet);
+        }
       }
       if (manualCity.trim()) {
         fd.append('manualCity', manualCity.trim());
@@ -537,28 +607,91 @@ export default function PptConverterView() {
             </div>
 
             {companionExcelFile ? (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#111e33', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '8px', padding: '10px 14px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="#22c55e">
-                    <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
-                  </svg>
-                  <div>
-                    <strong style={{ color: '#fff', fontSize: '13px' }}>{companionExcelFile.name}</strong>
-                    <div style={{ fontSize: '11px', color: '#4ade80', marginTop: '2px' }}>
-                      ✓ Companion Excel attached ({formatBytes(companionExcelFile.size)}) — Ready to extract Availability, Coordinates & Rates
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', background: '#111e33', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '8px', padding: '12px 14px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="#22c55e">
+                      <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+                    </svg>
+                    <div>
+                      <strong style={{ color: '#fff', fontSize: '13px' }}>{companionExcelFile.name}</strong>
+                      <div style={{ fontSize: '11px', color: '#4ade80', marginTop: '2px' }}>
+                        ✓ Attached ({formatBytes(companionExcelFile.size)})
+                        {inspectingCompanion && ' — Inspecting columns...'}
+                        {!inspectingCompanion && companionInspection && ` — ${companionInspection.totalSites} sites detected in sheet "${companionInspection.activeSheet}"`}
+                      </div>
                     </div>
                   </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {companionInspection && (
+                      <button
+                        type="button"
+                        className="scooh-btn secondary"
+                        onClick={() => setShowCompanionMappingModal(true)}
+                        style={{ fontSize: '11.5px', padding: '3px 10px' }}
+                      >
+                        ⚙️ Review Column Mapping
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="scooh-iconbtn danger-icon"
+                      onClick={() => {
+                        setCompanionExcelFile(null);
+                        setCompanionInspection(null);
+                        setCompanionColumnMapping({});
+                        setCompanionSelectedSheet('');
+                      }}
+                      title="Remove companion Excel"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  className="scooh-iconbtn danger-icon"
-                  onClick={() => setCompanionExcelFile(null)}
-                  title="Remove companion Excel"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                  </svg>
-                </button>
+
+                {companionInspection && (
+                  <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '10px' }}>
+                    {companionInspection.sheets && companionInspection.sheets.length > 1 && (
+                      <div style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 600 }}>Worksheet:</span>
+                        <select
+                          value={companionSelectedSheet || companionInspection.activeSheet || ''}
+                          onChange={(e) => handleCompanionSheetChange(e.target.value)}
+                          style={{ background: '#0f172a', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '4px', padding: '2px 6px', fontSize: '11px', fontWeight: 700, outline: 'none', cursor: 'pointer' }}
+                        >
+                          {companionInspection.sheets.map(s => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', fontSize: '10.5px', color: '#cbd5e1' }}>
+                      {MASTER_TARGET_FIELDS.map(f => {
+                        const numIdx = parseInt(companionColumnMapping[f.key], 10);
+                        const colName = (!isNaN(numIdx) && numIdx >= 1 && companionInspection.headers[numIdx - 1]) ? companionInspection.headers[numIdx - 1] : null;
+                        return (
+                          <span
+                            key={f.key}
+                            onClick={() => setShowCompanionMappingModal(true)}
+                            style={{
+                              padding: '2px 7px',
+                              borderRadius: '4px',
+                              background: colName ? 'rgba(34, 197, 94, 0.12)' : 'rgba(255, 255, 255, 0.04)',
+                              border: colName ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid #334155',
+                              color: colName ? '#e2e8f0' : '#64748b',
+                              cursor: 'pointer'
+                            }}
+                            title={colName ? `Mapped to Column ${numIdx}: "${colName}" (Click to customize)` : 'Not mapped (Click to configure)'}
+                          >
+                            <strong>{f.masterCol}:</strong> {colName || 'Blank'}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{ padding: '8px 12px', background: 'rgba(255, 255, 255, 0.02)', border: '1px dashed #243447', borderRadius: '8px', textAlign: 'center', fontSize: '12px', color: '#64748b' }}>
@@ -907,6 +1040,150 @@ export default function PptConverterView() {
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Companion Excel Column Mapping Modal */}
+      {showCompanionMappingModal && companionInspection && (
+        <div
+          className="scooh-modal-backdrop"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            background: 'rgba(0, 0, 0, 0.85)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+          onClick={() => setShowCompanionMappingModal(false)}
+        >
+          <div
+            className="scooh-panel"
+            style={{
+              width: '100%',
+              maxWidth: '920px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              border: '1px solid #22c55e',
+              boxShadow: '0 25px 60px rgba(0,0,0,0.85), 0 0 25px rgba(34, 197, 94, 0.2)',
+              background: '#071224',
+              padding: '24px',
+              borderRadius: '14px',
+              color: '#f8fafc'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b', paddingBottom: '12px', marginBottom: '16px' }}>
+              <div>
+                <h3 style={{ margin: 0, color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '18px', fontWeight: 800 }}>
+                  <span style={{ color: '#22c55e' }}>📊</span>
+                  <span>Companion Excel Column Mapping</span>
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>
+                  Map which columns in your companion Excel spreadsheet contain Availability, Latitude / Longitude GPS coordinates, Rates, etc.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="scooh-btn ghost"
+                onClick={() => setShowCompanionMappingModal(false)}
+                style={{ padding: '4px 10px', fontSize: '14px', minHeight: '30px' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Sheet Selector */}
+            {companionInspection.sheets && companionInspection.sheets.length > 1 && (
+              <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px', background: '#0a1628', padding: '10px 14px', borderRadius: '8px' }}>
+                <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#e2e8f0' }}>Target Worksheet:</span>
+                <select
+                  value={companionSelectedSheet || companionInspection.activeSheet || ''}
+                  onChange={(e) => handleCompanionSheetChange(e.target.value)}
+                  style={{ background: '#111e33', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '6px', padding: '6px 12px', fontSize: '12.5px', fontWeight: 700 }}
+                >
+                  {companionInspection.sheets.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Mapping Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+              {MASTER_TARGET_FIELDS.map((field) => {
+                const currentIdx = companionColumnMapping[field.key] || '';
+                return (
+                  <div
+                    key={field.key}
+                    style={{
+                      background: '#0a1628',
+                      border: currentIdx ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid #1e293b',
+                      borderRadius: '8px',
+                      padding: '12px 14px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '6px' }}>
+                      <strong style={{ color: '#fff', fontSize: '13px' }}>
+                        {field.masterCol}
+                        {field.required && <span style={{ color: '#ef4444', marginLeft: '4px' }}>*</span>}
+                      </strong>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>{field.desc}</span>
+                    </div>
+
+                    <select
+                      value={currentIdx}
+                      onChange={(e) => {
+                        const val = e.target.value ? parseInt(e.target.value, 10) : '';
+                        setCompanionColumnMapping(prev => ({
+                          ...prev,
+                          [field.key]: val
+                        }));
+                      }}
+                      style={{
+                        width: '100%',
+                        background: '#111e33',
+                        border: '1px solid #2d3e58',
+                        color: currentIdx ? '#4ade80' : '#94a3b8',
+                        borderRadius: '6px',
+                        padding: '8px 10px',
+                        fontSize: '12.5px',
+                        fontWeight: currentIdx ? 700 : 400
+                      }}
+                    >
+                      <option value="">-- Leave Blank (No match in sheet) --</option>
+                      {companionInspection.headers.map((h, i) => (
+                        <option key={i} value={i + 1}>
+                          Col {i + 1}: "{h}"
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid #1e293b', paddingTop: '14px' }}>
+              <button
+                type="button"
+                className="scooh-btn ghost"
+                onClick={() => setShowCompanionMappingModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="scooh-btn primary"
+                onClick={handleCompanionApplyCustomMapping}
+                style={{ minHeight: '38px', padding: '0 20px', fontSize: '12.5px', fontWeight: 800 }}
+              >
+                ✓ Confirm & Apply Mapping
+              </button>
             </div>
           </div>
         </div>

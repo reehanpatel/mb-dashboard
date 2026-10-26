@@ -1028,6 +1028,17 @@ const handleInspectExcel = (req, res) => {
     '--inspect-excel', inputPath
   ];
 
+  const targetSheet = req.body?.sheetName || req.query?.sheetName;
+  if (targetSheet) {
+    args.push('--sheet', String(targetSheet));
+  }
+
+  const colMapping = req.body?.columnMapping || req.query?.columnMapping;
+  if (colMapping) {
+    const mappingStr = typeof colMapping === 'string' ? colMapping : JSON.stringify(colMapping);
+    args.push('--mapping', mappingStr);
+  }
+
   execFile(pythonBin, args, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
     try { fs.unlinkSync(inputPath); } catch (_) {}
     if (err || !stdout) {

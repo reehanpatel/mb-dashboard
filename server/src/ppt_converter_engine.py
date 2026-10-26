@@ -186,41 +186,57 @@ HEADER_KEYWORDS = [
     'location', 'address', 'area', 'landmark', 'site name', 'site', 'description', 'specification',
     'city', 'town', 'district', 'media', 'mediatype', 'type', 'display',
     'light', 'lighting', 'illumination', 'illum',
-    'width', 'height', 'w', 'h', 'size', 'dimension', 'dimensions', 'sqft', 'sq ft', 'area',
-    'avail', 'availability', 'availablity', 'status', 'date', 'down date', 'up date', 'vacant', 'booked',
+    'width', 'height', 'w', 'h', 'wdt', 'hig', 'size', 'dimension', 'dimensions', 'sqft', 'sq ft', 'area',
+    'avail', 'availability', 'availablity', 'availibility', 'status', 'date', 'down date', 'up date', 'vacant', 'booked',
     'rate', 'selling', 'amount', 'fee', 'price', 'rent', 'cost',
-    'lat', 'latitude', 'long', 'longitude', 'lng', 'gps', 'coord', 'coordinates',
+    'lat', 'latitude', 'long', 'longitude', 'lng', 'gps', 'coord', 'coordinates', 'map',
     'client', 'remarks'
 ]
 
-COL_DEFINITIONS = [
+COL_TIER1 = [
     ('code', ['mb code / site code', 'mb code', 'site code', 'mb_code', 'site_code', 'site id', 'sitecode', 'code', 'site no', 'siteno', 'mb no', 'mbno', 'id']),
-    ('sr_no', ['sr no', 'sr. no', 'srno', 'sr_no', 's.no', 'sno', 'serial no', 'serial', 'index', 'no.']),
+    ('sr_no', ['sr no', 'sr. no', 'sr. no.', 'srno', 'sr_no', 's.no', 's.no.', 'sno', 'serial no', 'serial no.', 'serial', 'index', 'no.']),
     ('city', ['city', 'location city', 'town', 'district', 'market']),
-    ('location', ['location / specification', 'location/specification', 'location', 'site location', 'address', 'site address', 'site name', 'landmark', 'road / location', 'description', 'site', 'area / landmark', 'area']),
-    ('media', ['media type', 'media_type', 'mediatype', 'billboard type', 'type', 'format', 'media', 'display type', 'display']),
-    ('light', ['light', 'lighting', 'illumination', 'illum', 'light type']),
-    ('w', ['w', 'width', 'w (ft)', 'w(ft)', 'w ft', 'width (ft)', 'width in feet']),
-    ('h', ['h', 'height', 'h (ft)', 'h(ft)', 'h ft', 'height (ft)', 'height in feet']),
+    ('location', ['location', 'location / specification', 'location/specification', 'site location', 'site address', 'address', 'site name']),
+    ('w', ['w', 'width', 'wdt', 'wdt.', 'w (ft)', 'w(ft)', 'w ft', 'w.ft', 'w.ft.', 'width (ft)', 'width in feet']),
+    ('h', ['h', 'height', 'hig', 'hig.', 'ht', 'ht.', 'h (ft)', 'h(ft)', 'h ft', 'h.ft', 'h.ft.', 'height (ft)', 'height in feet']),
+    ('sq_ft', ['sq ft', 'sqft', 'sq. ft', 'sq.ft', 'total size', 'total sqft', 'total sq.ft', 'total sq ft', 'area (sq ft)', 'area (sqft)', 'sq_ft', 'total area']),
     ('size', ['size', 'dimensions', 'dimension', 'size (ft)', 'size (wxh)', 'size(ft)']),
-    ('sq_ft', ['sq ft', 'sqft', 'sq. ft', 'area (sq ft)', 'area (sqft)', 'total sqft', 'total sq ft', 'sq_ft', 'area']),
-    ('avail', ['availablity', 'availability', 'down date', 'available from', 'booked till', 'vacant from', 'free from', 'ready from', 'up date', 'expiry', 'valid till', 'end date', 'booking date', 'date', 'status', 'vacant']),
-    ('rate', ['selling amount', 'selling rate', 'amount', 'rate', 'price', 'monthly rate', 'adv fee per month', 'adv fee', 'adv. fee', 'rental', 'cost']),
-    ('coords', ['latitude longitude', 'lat long', 'latitude, longitude', 'lat, lng', 'lat/long', 'lat - long', 'gps', 'coordinates', 'geo coordinates', 'location coordinates', 'coords']),
+    ('avail', ['availablity', 'availability', 'availibility', 'available', 'availibility / vacant date', 'availability / vacant date', 'vacant date', 'down date', 'available from', 'booked till', 'vacant from', 'free from', 'ready from', 'up date', 'expiry', 'valid till', 'end date', 'booking date', 'date of availability', 'availability date']),
+    ('rate', ['rate for 1 month', 'rate for 1month', 'selling amount', 'selling rate', 'monthly rate', 'adv fee per month', 'adv fee', 'adv. fee', 'advt. fees per month', 'total amount', 'rental', 'cost', 'rate', 'price', 'amount']),
+    ('coords', ['latitude- longitude (google map location)', 'latitude- longitude', 'latitude - longitude', 'latitude longitude', 'latitude, longitude', 'latitude / longitude', 'lat long', 'lat-long', 'lat - long', 'lat, lng', 'lat/long', 'google map location', 'google map', 'map location', 'coordinates', 'geo coordinates', 'location coordinates', 'coords', 'gps']),
+    ('media', ['media type', 'media_type', 'mediatype', 'billboard type', 'type of hoarding', 'display type', 'media', 'type']),
+    ('light', ['light', 'lighting', 'illumination', 'illum', 'light type']),
     ('lat', ['latitude', 'lat', 'latitude (n)', 'latitude(n)']),
     ('lng', ['longitude', 'long', 'lng', 'lon', 'longitude (e)', 'longitude(e)'])
+]
+
+COL_TIER2 = [
+    ('location', ['landmark', 'road / location', 'description', 'site', 'area / landmark', 'area']),
+    ('media', ['format', 'display']),
+    ('avail', ['date', 'status', 'vacant'])
 ]
 
 def detect_best_sheet_and_headers(wb, requested_sheet=None, column_mapping=None):
     """
     Scans workbook sheets and header rows using multi-keyword scoring to find the true data sheet and header row.
+    Supports explicit sheet requests, filtering empty sheets, and applying custom column mapping safely.
     """
     candidate_sheets = []
     if requested_sheet and requested_sheet in wb.sheetnames:
         candidate_sheets = [wb[requested_sheet]]
     else:
         for sname in wb.sheetnames:
-            candidate_sheets.append(wb[sname])
+            try:
+                s = wb[sname]
+                # Filter out completely empty sheets
+                if getattr(s, 'max_row', 0) > 1 or getattr(s, 'max_column', 0) > 1:
+                    candidate_sheets.append(s)
+            except Exception:
+                pass
+        if not candidate_sheets:
+            for sname in wb.sheetnames:
+                candidate_sheets.append(wb[sname])
 
     best_ws = candidate_sheets[0]
     best_row_idx = 1
@@ -228,11 +244,23 @@ def detect_best_sheet_and_headers(wb, requested_sheet=None, column_mapping=None)
     best_score = -1
 
     for ws in candidate_sheets:
-        max_r = min(15, ws.max_row) if ws.max_row else 1
+        max_r = min(30, ws.max_row) if ws.max_row else 1
         max_c = ws.max_column if ws.max_column else 1
         for r in range(1, max_r + 1):
             row_vals = [str(ws.cell(r, c).value or '').strip() for c in range(1, max_c + 1)]
             score = sum(1 for val in row_vals if any(kw in val.lower().replace('_', ' ') for kw in HEADER_KEYWORDS if val))
+            # Extra weight for distinctive proposal / site list columns
+            if any('location' in val.lower() or 'address' in val.lower() for val in row_vals if val):
+                score += 4
+            if any(val.lower() in ('w', 'wdt', 'wdt.', 'width') for val in row_vals if val):
+                score += 3
+            if any('size' in val.lower() or 'sqft' in val.lower() for val in row_vals if val):
+                score += 2
+            if any('rate' in val.lower() or 'amount' in val.lower() or 'price' in val.lower() for val in row_vals if val):
+                score += 3
+            if any('lat' in val.lower() or 'coord' in val.lower() or 'map' in val.lower() for val in row_vals if val):
+                score += 3
+
             if score > best_score:
                 best_score = score
                 best_ws = ws
@@ -248,34 +276,54 @@ def detect_best_sheet_and_headers(wb, requested_sheet=None, column_mapping=None)
         best_headers.pop()
 
     mapping = {}
+    # Apply custom mapping first (ensuring integers)
     if column_mapping:
-        mapping = dict(column_mapping)
-    else:
-        # Pass 1: Exact matches
-        for c_idx, h in enumerate(best_headers, start=1):
-            h_clean = h.lower().strip().replace('_', ' ')
-            if not h_clean: continue
-            for field, aliases in COL_DEFINITIONS:
-                if field in mapping: continue
-                if any(h_clean == a for a in aliases):
-                    mapping[field] = c_idx
-                    break
+        for k, v in column_mapping.items():
+            try:
+                if v is not None and str(v).strip() != '' and int(v) > 0:
+                    mapping[k] = int(v)
+            except Exception:
+                pass
 
-        # Pass 2: High-confidence word-boundary substring matches
-        for c_idx, h in enumerate(best_headers, start=1):
-            h_clean = h.lower().strip().replace('_', ' ')
-            if not h_clean: continue
-            if c_idx in mapping.values(): continue
-            for field, aliases in COL_DEFINITIONS:
-                if field in mapping: continue
-                matched_alias = False
-                for a in aliases:
-                    if len(a) >= 3 and re.search(r'\b' + re.escape(a) + r'\b', h_clean):
-                        mapping[field] = c_idx
-                        matched_alias = True
-                        break
-                if matched_alias:
-                    break
+    # Pass 1: Tier 1 exact matches for unmapped fields
+    for c_idx, h in enumerate(best_headers, start=1):
+        h_clean = h.lower().strip().replace('_', ' ')
+        if not h_clean or c_idx in mapping.values(): continue
+        for field, aliases in COL_TIER1:
+            if field in mapping: continue
+            if any(h_clean == a for a in aliases):
+                mapping[field] = c_idx
+                break
+
+    # Pass 2: Tier 1 word-boundary matches for unmapped fields
+    for c_idx, h in enumerate(best_headers, start=1):
+        h_clean = h.lower().strip().replace('_', ' ')
+        if not h_clean or c_idx in mapping.values(): continue
+        for field, aliases in COL_TIER1:
+            if field in mapping: continue
+            if any(len(a) >= 3 and re.search(r'\b' + re.escape(a) + r'\b', h_clean) for a in aliases):
+                mapping[field] = c_idx
+                break
+
+    # Pass 3: Tier 2 exact matches for unmapped fields
+    for c_idx, h in enumerate(best_headers, start=1):
+        h_clean = h.lower().strip().replace('_', ' ')
+        if not h_clean or c_idx in mapping.values(): continue
+        for field, aliases in COL_TIER2:
+            if field in mapping: continue
+            if any(h_clean == a for a in aliases):
+                mapping[field] = c_idx
+                break
+
+    # Pass 4: Tier 2 word-boundary matches for unmapped fields
+    for c_idx, h in enumerate(best_headers, start=1):
+        h_clean = h.lower().strip().replace('_', ' ')
+        if not h_clean or c_idx in mapping.values(): continue
+        for field, aliases in COL_TIER2:
+            if field in mapping: continue
+            if any(len(a) >= 3 and re.search(r'\b' + re.escape(a) + r'\b', h_clean) for a in aliases):
+                mapping[field] = c_idx
+                break
 
     return best_ws, best_row_idx, best_headers, mapping
 
@@ -887,9 +935,13 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
 
         def get_val(field):
             col = mapping.get(field)
-            if col and col <= ws.max_column:
-                v = ws.cell(r, col).value
-                return str(v).strip() if v is not None else ""
+            try:
+                col_int = int(col) if col is not None else None
+                if col_int and 1 <= col_int <= ws.max_column:
+                    v = ws.cell(r, col_int).value
+                    return str(v).strip() if v is not None else ""
+            except Exception:
+                pass
             return ""
 
         code_val = get_val('code')
@@ -923,7 +975,12 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
         # Clean dimensions / size
         size_str = ""
         if w and h:
-            size_str = f"{w}x{h} ft"
+            try:
+                w_disp = int(float(w)) if float(w).is_integer() else w
+                h_disp = int(float(h)) if float(h).is_integer() else h
+                size_str = f"{w_disp}x{h_disp} ft"
+            except Exception:
+                size_str = f"{w}x{h} ft"
         elif size_raw:
             size_str = size_raw
         elif sq_ft:
@@ -933,7 +990,12 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
             if detected_size:
                 size_str = detected_size
 
-        # Media & Illumination fallback
+        # Media & Illumination fallback & normalization
+        if media and media.upper() in ('FL', 'BL', 'NL', 'LED', 'FRONTLIT', 'BACKLIT', 'NON LIT', 'NON-LIT', 'FRONT-LIT', 'BACK-LIT'):
+            if not light or light in ('BL', ''):
+                light = media.upper()
+            media = detect_media_type(loc) or 'Hoarding'
+
         if not media and loc:
             media = detect_media_type(loc)
         if not light and loc:
@@ -986,18 +1048,32 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
 
     return entries, headers_found, header_row_idx, mapping
 
-def inspect_excel(excel_path):
+def inspect_excel(excel_path, sheet_name=None, column_mapping=None):
     """
     Inspects an uploaded Excel workbook (.xlsx or .xls), returns sheets, detected headers,
     master template match status, mapping, and sample rows.
+    Supports targeting a specific worksheet and applying custom column mapping.
     """
     try:
         wb = load_any_workbook(excel_path)
     except Exception as e:
         return {'success': False, 'error': f"Failed to open Excel workbook: {str(e)}"}
 
-    sheet_names = wb.sheetnames
-    ws, header_row_idx, headers_found, mapping = detect_best_sheet_and_headers(wb)
+    # Filter out empty sheets
+    valid_sheets = []
+    for sname in wb.sheetnames:
+        try:
+            s = wb[sname]
+            if getattr(s, 'max_row', 0) > 1 or getattr(s, 'max_column', 0) > 1:
+                valid_sheets.append(sname)
+        except Exception:
+            valid_sheets.append(sname)
+    if not valid_sheets:
+        valid_sheets = list(wb.sheetnames)
+
+    ws, header_row_idx, headers_found, mapping = detect_best_sheet_and_headers(
+        wb, requested_sheet=sheet_name, column_mapping=column_mapping
+    )
 
     headers_norm = [h.strip().upper() for h in headers_found[:len(MASTER_TEMPLATE_COLUMNS)]]
     master_norm = [m.strip().upper() for m in MASTER_TEMPLATE_COLUMNS]
@@ -1017,9 +1093,13 @@ def inspect_excel(excel_path):
 
         def get_val(field):
             col = mapping.get(field)
-            if col and col <= ws.max_column:
-                v = ws.cell(r, col).value
-                return str(v).strip() if v is not None else ""
+            try:
+                col_int = int(col) if col is not None else None
+                if col_int and 1 <= col_int <= ws.max_column:
+                    v = ws.cell(r, col_int).value
+                    return str(v).strip() if v is not None else ""
+            except Exception:
+                pass
             return ""
 
         sr_no = get_val('sr_no')
@@ -1041,13 +1121,23 @@ def inspect_excel(excel_path):
 
         size_str = ""
         if w and h:
-            size_str = f"{w}x{h} ft"
+            try:
+                w_disp = int(float(w)) if float(w).is_integer() else w
+                h_disp = int(float(h)) if float(h).is_integer() else h
+                size_str = f"{w_disp}x{h_disp} ft"
+            except Exception:
+                size_str = f"{w}x{h} ft"
         elif size_raw:
             size_str = size_raw
         elif sq_ft:
             size_str = f"{sq_ft} sq.ft"
         elif loc:
             size_str = extract_size(loc) or ""
+
+        if media and media.upper() in ('FL', 'BL', 'NL', 'LED', 'FRONTLIT', 'BACKLIT'):
+            if not light:
+                light = media.upper()
+            media = 'Hoarding'
 
         rate_str = format_inr(rate_val) if rate_val else ""
 
@@ -1068,7 +1158,7 @@ def inspect_excel(excel_path):
 
     return {
         'success': True,
-        'sheets': sheet_names,
+        'sheets': valid_sheets,
         'activeSheet': ws.title,
         'headerRow': header_row_idx,
         'headers': headers_found,
@@ -1917,12 +2007,19 @@ def main():
         print(json.dumps(res, ensure_ascii=True))
         return
 
+    col_mapping = None
+    if args.mapping:
+        try:
+            col_mapping = json.loads(args.mapping)
+        except Exception as mErr:
+            sys.stderr.write(f"[PPT Engine] Notice parsing mapping: {mErr}\n")
+
     if args.inspect_excel:
         if not os.path.isfile(args.inspect_excel):
             err_res = {'success': False, 'error': f"Excel file not found at: {args.inspect_excel}"}
             print(json.dumps(err_res, ensure_ascii=True))
             sys.exit(1)
-        res = inspect_excel(args.inspect_excel)
+        res = inspect_excel(args.inspect_excel, sheet_name=args.sheet, column_mapping=col_mapping)
         print(json.dumps(res, ensure_ascii=True))
         return
         
@@ -1930,13 +2027,6 @@ def main():
         err_res = {'success': False, 'error': 'Both --input and --output are required for conversion.'}
         print(json.dumps(err_res, ensure_ascii=True))
         sys.exit(1)
-
-    col_mapping = None
-    if args.mapping:
-        try:
-            col_mapping = json.loads(args.mapping)
-        except Exception as mErr:
-            sys.stderr.write(f"[PPT Engine] Notice parsing mapping: {mErr}\n")
         
     try:
         res = process_presentation(

@@ -121,12 +121,20 @@ export default function ExcelConverterView() {
   }, []);
 
   // Inspect uploaded Excel workbook structure
-  const inspectExcelWorkbook = async (selectedFile) => {
+  const inspectExcelWorkbook = async (selectedFile, targetSheet = null, customMap = null) => {
     try {
       setInspecting(true);
       setError(null);
       const fd = new FormData();
       fd.append('file', selectedFile);
+      const sheetToUse = targetSheet !== null ? targetSheet : selectedSheet;
+      if (sheetToUse) {
+        fd.append('sheetName', sheetToUse);
+      }
+      const mapToUse = customMap !== null ? customMap : columnMapping;
+      if (mapToUse && Object.keys(mapToUse).length > 0) {
+        fd.append('columnMapping', JSON.stringify(mapToUse));
+      }
       const res = await api.post('/excel-converter/inspect-excel', fd, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
@@ -146,6 +154,22 @@ export default function ExcelConverterView() {
       setError('Failed to inspect Excel workbook: ' + (err.response?.data?.message || err.message));
     } finally {
       setInspecting(false);
+    }
+  };
+
+  const handleSheetChange = (newSheet) => {
+    setSelectedSheet(newSheet);
+    if (file) {
+      // Clear custom mapping so engine auto-maps the columns for the newly selected sheet
+      inspectExcelWorkbook(file, newSheet, {});
+    }
+  };
+
+  const handleApplyCustomMapping = () => {
+    setShowMappingModal(false);
+    if (file) {
+      // Re-inspect with updated custom mapping so preview rows, pills, and counts update immediately
+      inspectExcelWorkbook(file, selectedSheet, columnMapping);
     }
   };
 
@@ -639,13 +663,27 @@ export default function ExcelConverterView() {
           {file && excelInspection && (
             <div style={{ marginTop: '16px', background: '#0a1628', border: '1px solid #1e293b', borderRadius: '10px', padding: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: '13px', fontWeight: 800, color: excelInspection.matchesMaster ? '#4ade80' : '#fbbf24' }}>
                     {excelInspection.matchesMaster ? '✓ Standard Master Structure Detected' : '⚠️ Non-Standard Structure Detected'}
                   </span>
                   <span style={{ fontSize: '12px', color: '#94a3b8' }}>
                     ({excelInspection.totalSites} sites detected in sheet "{excelInspection.activeSheet}")
                   </span>
+                  {excelInspection.sheets && excelInspection.sheets.length > 1 && (
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(30, 41, 59, 0.8)', padding: '3px 8px', borderRadius: '6px', border: '1px solid #334155' }}>
+                      <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 700 }}>Sheet:</span>
+                      <select
+                        value={selectedSheet || excelInspection.activeSheet || ''}
+                        onChange={(e) => handleSheetChange(e.target.value)}
+                        style={{ background: '#0f172a', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '4px', padding: '2px 6px', fontSize: '11.5px', fontWeight: 700, outline: 'none', cursor: 'pointer' }}
+                      >
+                        {excelInspection.sheets.map(s => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -660,19 +698,21 @@ export default function ExcelConverterView() {
               {/* Quick Mapped Headers Pill Bar */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', fontSize: '11px', color: '#cbd5e1' }}>
                 {MASTER_TARGET_FIELDS.map(f => {
-                  const colIdx = columnMapping[f.key];
-                  const colName = colIdx && excelInspection.headers[colIdx - 1] ? excelInspection.headers[colIdx - 1] : null;
+                  const numIdx = parseInt(columnMapping[f.key], 10);
+                  const colName = (!isNaN(numIdx) && numIdx >= 1 && excelInspection.headers[numIdx - 1]) ? excelInspection.headers[numIdx - 1] : null;
                   return (
                     <span
                       key={f.key}
+                      onClick={() => setShowMappingModal(true)}
                       style={{
                         padding: '3px 8px',
                         borderRadius: '5px',
                         background: colName ? 'rgba(34, 197, 94, 0.12)' : 'rgba(255, 255, 255, 0.05)',
                         border: colName ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid #334155',
-                        color: colName ? '#e2e8f0' : '#64748b'
+                        color: colName ? '#e2e8f0' : '#64748b',
+                        cursor: 'pointer'
                       }}
-                      title={colName ? `Mapped to Column ${colIdx}: "${colName}"` : 'Not mapped (will be left blank)'}
+                      title={colName ? `Mapped to Column ${numIdx}: "${colName}" (Click to change)` : 'Not mapped (Click to configure)'}
                     >
                       <strong>{f.masterCol}:</strong> {colName || 'Blank'}
                     </span>
@@ -983,9 +1023,9 @@ export default function ExcelConverterView() {
               <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px', background: '#0a1628', padding: '10px 14px', borderRadius: '8px' }}>
                 <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#e2e8f0' }}>Target Worksheet:</span>
                 <select
-                  value={selectedSheet}
-                  onChange={(e) => setSelectedSheet(e.target.value)}
-                  style={{ background: '#111e33', color: '#fff', border: '1px solid #2d3e58', borderRadius: '6px', padding: '6px 12px', fontSize: '12.5px' }}
+                  value={selectedSheet || excelInspection.activeSheet || ''}
+                  onChange={(e) => handleSheetChange(e.target.value)}
+                  style={{ background: '#111e33', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '6px', padding: '6px 12px', fontSize: '12.5px', fontWeight: 700 }}
                 >
                   {excelInspection.sheets.map(s => (
                     <option key={s} value={s}>{s}</option>
@@ -1059,7 +1099,7 @@ export default function ExcelConverterView() {
               <button
                 type="button"
                 className="scooh-btn primary"
-                onClick={() => setShowMappingModal(false)}
+                onClick={handleApplyCustomMapping}
                 style={{ minHeight: '38px', padding: '0 20px', fontSize: '12.5px', fontWeight: 800 }}
               >
                 ✓ Confirm & Apply Mapping
