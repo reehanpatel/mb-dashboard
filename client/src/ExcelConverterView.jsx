@@ -22,7 +22,7 @@ const MASTER_TARGET_FIELDS = [
   { key: 'w', label: 'Width (W)', masterCol: 'W', required: false, desc: 'Width in feet' },
   { key: 'h', label: 'Height (H)', masterCol: 'H', required: false, desc: 'Height in feet' },
   { key: 'sq_ft', label: 'Total Sq Ft', masterCol: 'SQ FT', required: false, desc: 'Calculated area in square feet' },
-  { key: 'avail', label: 'Availability', masterCol: 'AVAILABLITY', required: false, desc: 'Available or Booked till date' },
+  { key: 'avail', label: 'Availability', masterCol: 'AVAILABLITY', required: false, desc: 'Available' },
   { key: 'rate', label: 'Selling Amount', masterCol: 'Selling Amount', required: false, desc: 'Monthly advertising fee (INR)' },
   { key: 'coords', label: 'Location Coordinates', masterCol: 'Latitude Longitude', required: false, desc: 'GPS Lat, Lng coordinates' }
 ];

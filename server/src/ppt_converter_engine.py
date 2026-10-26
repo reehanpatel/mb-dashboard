@@ -670,10 +670,8 @@ def detect_rate(text):
         return val
     return 'On Request'
 
-def detect_availability(text):
-    m = re.search(r'\b(available(?:\s+from\s+[A-Za-z0-9\s,]+)?|booked(?:\s+till\s+[A-Za-z0-9\s,]+)?|ready\s+to\s+book)\b', text, re.IGNORECASE)
-    if m:
-        return m.group(1).capitalize()
+def detect_availability(text=None):
+    """Guarantees availability displays as 'Available' exclusively. Never outputs 'Booked till'."""
     return 'Available'
 
 def detect_coords(text):
@@ -1351,7 +1349,7 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
             'h': h,
             'sq_ft': sq_ft,
             'rate': rate_str or '',
-            'availability': avail or 'Available',
+            'availability': 'Available',
             'coords': coords or '',
             'photo_bytes': photo_bytes,
             'review_needed': len(review_flags) > 0,
@@ -1465,7 +1463,7 @@ def inspect_excel(excel_path, sheet_name=None, column_mapping=None):
                 'light': light or 'BL',
                 'size': size_str,
                 'rate': rate_str,
-                'avail': avail or 'Available',
+                'avail': 'Available',
                 'coords': coords
             })
 
@@ -1551,8 +1549,7 @@ def merge_companion_excel(ppt_entries, companion_excel_path, column_mapping=None
 
         # Apply matched fields from Excel (Availability, Latitude Longitude, Rate, etc.)
         if matched:
-            if matched.get('availability') and str(matched['availability']).strip():
-                entry['availability'] = str(matched['availability']).strip()
+            entry['availability'] = 'Available'
             if matched.get('coords') and str(matched['coords']).strip():
                 entry['coords'] = str(matched['coords']).strip()
             if matched.get('rate') and str(matched['rate']).strip():
@@ -1660,7 +1657,7 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
                 w_val,
                 h_val,
                 sqft_val,
-                e.get('availability') or 'Available',
+                'Available',
                 e.get('rate') or '',
                 e.get('coords') or ''
             ]
@@ -1779,6 +1776,9 @@ def generate_converted_pptx_pure(template_file, output_path, entries, is_excel=F
         slide_xml = slide_xml.replace('Gantry', saxutils.escape(mtype))
         slide_xml = slide_xml.replace('BL', saxutils.escape(illum))
         slide_xml = slide_xml.replace('₹ 2,25,000/-', saxutils.escape(rate))
+        # User rule: Don't show "Booked till", keep only "Available" in availability
+        slide_xml = slide_xml.replace('Booked till 30 Sept 2026', 'Available')
+        slide_xml = re.sub(r'Booked\s+till[^\n<]*', 'Available', slide_xml, flags=re.IGNORECASE)
         # If coords is empty (e.g. pure PPT upload with no coords), remove Location Coordinates block
         # If coords is present (from Excel conversion or companion Excel), populate it!
         if not coords:
