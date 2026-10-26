@@ -113,8 +113,14 @@ export default function PptConverterView() {
     setError(null);
     if (!selectedFile) return;
     const name = selectedFile.name || '';
-    if (!name.toLowerCase().endsWith('.pptx')) {
-      setError('Please select a valid PowerPoint presentation (.pptx).');
+    const lower = name.toLowerCase();
+    if (!lower.endsWith('.pptx') && !lower.endsWith('.xlsx') && !lower.endsWith('.xls')) {
+      setError('Please select a valid PowerPoint presentation (.pptx) or Excel workbook (.xlsx / .xls).');
+      return;
+    }
+    if ((lower.endsWith('.xlsx') || lower.endsWith('.xls')) && pptFile) {
+      setCompanionExcelFile(selectedFile);
+      inspectCompanionExcel(selectedFile);
       return;
     }
     setPptFile(selectedFile);
@@ -528,7 +534,7 @@ export default function PptConverterView() {
               type="file"
               ref={pptInputRef}
               onChange={handlePptFileChange}
-              accept=".pptx"
+              accept=".pptx,.xlsx,.xls"
               style={{ display: 'none' }}
             />
 
@@ -539,8 +545,8 @@ export default function PptConverterView() {
                     <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12v9m-4-4 4-4 4 4" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
                 </div>
-                <h4>Drag and drop PowerPoint presentation here</h4>
-                <p>or click to browse (.pptx format)</p>
+                <h4>Drag and drop presentation or Excel workbook here</h4>
+                <p>or click to browse (.pptx, .xlsx, .xls formats)</p>
               </div>
             ) : (
               <div className="scooh-ppt-file-card">
@@ -630,7 +636,7 @@ export default function PptConverterView() {
                         onClick={() => setShowCompanionMappingModal(true)}
                         style={{ fontSize: '11.5px', padding: '3px 10px' }}
                       >
-                        ⚙️ Review Column Mapping
+                        ⚙️ Column Mapping (Optional)
                       </button>
                     )}
                     <button

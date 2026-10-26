@@ -1073,12 +1073,12 @@ app.post('/api/ppt-converter/convert', auth, pptMultiUpload, (req, res) => {
   const inputPath = mainFile.path;
   const originalName = mainFile.originalname || '';
   const lowerName = originalName.toLowerCase();
-  const isPptx = lowerName.endsWith('.pptx');
+  const isSupported = lowerName.endsWith('.pptx') || lowerName.endsWith('.xlsx') || lowerName.endsWith('.xls');
 
-  if (!isPptx) {
+  if (!isSupported) {
     try { fs.unlinkSync(inputPath); } catch (_) {}
     if (companionFile?.path) { try { fs.unlinkSync(companionFile.path); } catch (_) {} }
-    return res.status(400).json({ message: 'Only .pptx files are supported for PowerPoint conversion.' });
+    return res.status(400).json({ message: 'Only .pptx, .xlsx, or .xls files are supported for conversion.' });
   }
 
   const tmplInfo = getMasterTemplateInfo();

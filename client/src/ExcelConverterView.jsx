@@ -145,10 +145,6 @@ export default function ExcelConverterView() {
       if (res.data?.activeSheet) {
         setSelectedSheet(res.data.activeSheet);
       }
-      // Only prompt mapping modal if location column could not be automatically detected
-      if (res.data?.mapping && !res.data.mapping.location) {
-        setShowMappingModal(true);
-      }
     } catch (err) {
       console.error('Excel inspection error:', err);
       setError('Failed to inspect Excel workbook: ' + (err.response?.data?.message || err.message));
@@ -631,14 +627,9 @@ export default function ExcelConverterView() {
                       Inspecting structure...
                     </span>
                   )}
-                  {!inspecting && excelInspection?.matchesMaster && (
+                  {!inspecting && (
                     <span className="scooh-pill active" style={{ marginLeft: '12px' }}>
-                      ✓ Matches Jade Blue Reference Standard
-                    </span>
-                  )}
-                  {!inspecting && excelInspection && !excelInspection.matchesMaster && (
-                    <span className="scooh-pill" style={{ marginLeft: '12px', background: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.4)' }}>
-                      ⚠️ Custom Structure (Mapping Available)
+                      ✓ Auto-Mapped & Ready to Convert
                     </span>
                   )}
                 </div>
@@ -664,8 +655,8 @@ export default function ExcelConverterView() {
             <div style={{ marginTop: '16px', background: '#0a1628', border: '1px solid #1e293b', borderRadius: '10px', padding: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 800, color: excelInspection.matchesMaster ? '#4ade80' : '#fbbf24' }}>
-                    {excelInspection.matchesMaster ? '✓ Standard Master Structure Detected' : '⚠️ Non-Standard Structure Detected'}
+                  <span style={{ fontSize: '13px', fontWeight: 800, color: '#4ade80' }}>
+                    ✓ Excel Data Auto-Detected
                   </span>
                   <span style={{ fontSize: '12px', color: '#94a3b8' }}>
                     ({excelInspection.totalSites} sites detected in sheet "{excelInspection.activeSheet}")
@@ -691,7 +682,7 @@ export default function ExcelConverterView() {
                   onClick={() => setShowMappingModal(true)}
                   style={{ fontSize: '12px', padding: '4px 12px' }}
                 >
-                  ⚙️ {excelInspection.matchesMaster ? 'Review Column Mapping' : 'Open Column Mapping Interface'}
+                  ⚙️ Column Mapping (Optional)
                 </button>
               </div>
 

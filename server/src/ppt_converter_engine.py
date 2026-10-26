@@ -184,43 +184,96 @@ def format_gps_coords(raw_coords, raw_lat=None, raw_lng=None):
 HEADER_KEYWORDS = [
     'sr', 'sno', 'srno', 'serial', 'code', 'mb code', 'site code', 'site id', 'siteid', 'mbcode',
     'location', 'address', 'area', 'landmark', 'site name', 'site', 'description', 'specification',
-    'city', 'town', 'district', 'media', 'mediatype', 'type', 'display',
-    'light', 'lighting', 'illumination', 'illum',
-    'width', 'height', 'w', 'h', 'wdt', 'hig', 'size', 'dimension', 'dimensions', 'sqft', 'sq ft', 'area',
+    'particulars', 'venue', 'place', 'street', 'road', 'details', 'placement', 'hoarding', 'board',
+    'city', 'town', 'district', 'market', 'station', 'media', 'mediatype', 'type', 'display', 'format',
+    'light', 'lighting', 'illumination', 'illum', 'lit',
+    'width', 'height', 'w', 'h', 'wdt', 'hig', 'ht', 'size', 'dimension', 'dimensions', 'sqft', 'sq ft', 'area',
     'avail', 'availability', 'availablity', 'availibility', 'status', 'date', 'down date', 'up date', 'vacant', 'booked',
-    'rate', 'selling', 'amount', 'fee', 'price', 'rent', 'cost',
-    'lat', 'latitude', 'long', 'longitude', 'lng', 'gps', 'coord', 'coordinates', 'map',
+    'rate', 'selling', 'amount', 'fee', 'price', 'rent', 'cost', 'tariff', 'charges',
+    'lat', 'latitude', 'long', 'longitude', 'lng', 'gps', 'coord', 'coordinates', 'map', 'link', 'gmap',
     'client', 'remarks'
 ]
 
 COL_TIER1 = [
-    ('code', ['mb code / site code', 'mb code', 'site code', 'mb_code', 'site_code', 'site id', 'sitecode', 'code', 'site no', 'siteno', 'mb no', 'mbno', 'id']),
-    ('sr_no', ['sr no', 'sr. no', 'sr. no.', 'srno', 'sr_no', 's.no', 's.no.', 'sno', 'serial no', 'serial no.', 'serial', 'index', 'no.']),
-    ('city', ['city', 'location city', 'town', 'district', 'market']),
-    ('location', ['location', 'location / specification', 'location/specification', 'site location', 'site address', 'address', 'site name']),
-    ('w', ['w', 'width', 'wdt', 'wdt.', 'w (ft)', 'w(ft)', 'w ft', 'w.ft', 'w.ft.', 'width (ft)', 'width in feet']),
-    ('h', ['h', 'height', 'hig', 'hig.', 'ht', 'ht.', 'h (ft)', 'h(ft)', 'h ft', 'h.ft', 'h.ft.', 'height (ft)', 'height in feet']),
-    ('sq_ft', ['sq ft', 'sqft', 'sq. ft', 'sq.ft', 'total size', 'total sqft', 'total sq.ft', 'total sq ft', 'area (sq ft)', 'area (sqft)', 'sq_ft', 'total area']),
-    ('size', ['size', 'dimensions', 'dimension', 'size (ft)', 'size (wxh)', 'size(ft)']),
-    ('avail', ['availablity', 'availability', 'availibility', 'available', 'availibility / vacant date', 'availability / vacant date', 'vacant date', 'down date', 'available from', 'booked till', 'vacant from', 'free from', 'ready from', 'up date', 'expiry', 'valid till', 'end date', 'booking date', 'date of availability', 'availability date']),
-    ('rate', ['rate for 1 month', 'rate for 1month', 'selling amount', 'selling rate', 'monthly rate', 'adv fee per month', 'adv fee', 'adv. fee', 'advt. fees per month', 'total amount', 'rental', 'cost', 'rate', 'price', 'amount']),
-    ('coords', ['latitude- longitude (google map location)', 'latitude- longitude', 'latitude - longitude', 'latitude longitude', 'latitude, longitude', 'latitude / longitude', 'lat long', 'lat-long', 'lat - long', 'lat, lng', 'lat/long', 'google map location', 'google map', 'map location', 'coordinates', 'geo coordinates', 'location coordinates', 'coords', 'gps']),
-    ('media', ['media type', 'media_type', 'mediatype', 'billboard type', 'type of hoarding', 'display type', 'media', 'type']),
-    ('light', ['light', 'lighting', 'illumination', 'illum', 'light type']),
+    ('code', [
+        'mb code / site code', 'mb code', 'site code', 'mb_code', 'site_code', 'site id', 'sitecode', 'code',
+        'site no', 'siteno', 'mb no', 'mbno', 'id', 'site #', 'spot #', 'board no', 'hoarding no', 'h.no',
+        'unique code', 'site reference', 'ref no', 'unit code'
+    ]),
+    ('sr_no', [
+        'sr no', 'sr. no', 'sr. no.', 'srno', 'sr_no', 's.no', 's.no.', 'sno', 'serial no', 'serial no.',
+        'serial', 'index', 'no.', 'item', 'sl no', 'sl.no', 'seq', 'seq no', 's #', 'sr #'
+    ]),
+    ('city', [
+        'city', 'location city', 'town', 'district', 'market', 'station', 'city / town', 'location (city)',
+        'location / city', 'area / city', 'place'
+    ]),
+    ('location', [
+        'location', 'location / specification', 'location/specification', 'site location', 'site address',
+        'address', 'site name', 'particulars', 'site particulars', 'site description', 'description',
+        'site details', 'details', 'venue', 'street', 'display location', 'board location', 'hoarding location',
+        'hoarding address', 'road / location', 'location / landmark', 'landmark / area', 'area / landmark',
+        'site placement', 'site specification', 'site particulars / location', 'placement'
+    ]),
+    ('w', [
+        'w', 'width', 'wdt', 'wdt.', 'w (ft)', 'w(ft)', 'w ft', 'w.ft', 'w.ft.', 'width (ft)', 'width in feet',
+        'breadth', 'b', 'width (in ft)', 'w (in ft)'
+    ]),
+    ('h', [
+        'h', 'height', 'hig', 'hig.', 'ht', 'ht.', 'h (ft)', 'h(ft)', 'h ft', 'h.ft', 'h.ft.', 'height (ft)',
+        'height in feet', 'height (in ft)', 'h (in ft)'
+    ]),
+    ('sq_ft', [
+        'sq ft', 'sqft', 'sq. ft', 'sq.ft', 'total size', 'total sqft', 'total sq.ft', 'total sq ft',
+        'area (sq ft)', 'area (sqft)', 'sq_ft', 'total area', 'sq.ft.', 'area', 'sft', 'sqfeet'
+    ]),
+    ('size', [
+        'size', 'dimensions', 'dimension', 'size (ft)', 'size (wxh)', 'size(ft)', 'size in ft', 'size (in ft)',
+        'board size', 'hoarding size', 'display size', 'actual size', 'measurement', 'measurements', 'w x h',
+        'h x w', 'w*h', 'h*w'
+    ]),
+    ('avail', [
+        'availablity', 'availability', 'availibility', 'available', 'availibility / vacant date',
+        'availability / vacant date', 'vacant date', 'down date', 'available from', 'booked till',
+        'vacant from', 'free from', 'ready from', 'up date', 'expiry', 'valid till', 'end date',
+        'booking date', 'date of availability', 'availability date', 'status', 'vacant', 'vacancy',
+        'available date', 'free date', 'booking status', 'occupancy'
+    ]),
+    ('rate', [
+        'rate for 1 month', 'rate for 1month', 'selling amount', 'selling rate', 'monthly rate',
+        'adv fee per month', 'adv fee', 'adv. fee', 'advt. fees per month', 'total amount', 'rental',
+        'cost', 'rate', 'price', 'amount', 'rent', 'tariff', 'card rate', 'offer rate', 'display charge',
+        'fee', 'per month', 'pm', 'charges', 'adv cost', 'adv. fee / month', 'monthly rental'
+    ]),
+    ('coords', [
+        'latitude- longitude (google map location)', 'latitude- longitude', 'latitude - longitude',
+        'latitude longitude', 'latitude, longitude', 'latitude / longitude', 'lat long', 'lat-long',
+        'lat - long', 'lat, lng', 'lat/long', 'google map location', 'google map link', 'google map',
+        'map location', 'map link', 'location map', 'coordinates', 'geo coordinates', 'location coordinates',
+        'coords', 'gps', 'gmap', 'map', 'link'
+    ]),
+    ('media', [
+        'media type', 'media_type', 'mediatype', 'billboard type', 'type of hoarding', 'display type',
+        'media', 'type', 'format', 'display', 'structure', 'structure type', 'board type', 'type of media'
+    ]),
+    ('light', [
+        'light', 'lighting', 'illumination', 'illum', 'light type', 'illumination type', 'lit'
+    ]),
     ('lat', ['latitude', 'lat', 'latitude (n)', 'latitude(n)']),
     ('lng', ['longitude', 'long', 'lng', 'lon', 'longitude (e)', 'longitude(e)'])
 ]
 
 COL_TIER2 = [
-    ('location', ['landmark', 'road / location', 'description', 'site', 'area / landmark', 'area']),
-    ('media', ['format', 'display']),
-    ('avail', ['date', 'status', 'vacant'])
+    ('location', ['landmark', 'site', 'road', 'area', 'placement', 'hoarding', 'board', 'name']),
+    ('media', ['media', 'type', 'format']),
+    ('avail', ['date', 'status', 'vacant', 'day'])
 ]
 
 def detect_best_sheet_and_headers(wb, requested_sheet=None, column_mapping=None):
     """
     Scans workbook sheets and header rows using multi-keyword scoring to find the true data sheet and header row.
     Supports explicit sheet requests, filtering empty sheets, and applying custom column mapping safely.
+    Includes Pass 5 Content-Based Auto-Detection to automatically recognize all columns from any Excel workbook.
     """
     candidate_sheets = []
     if requested_sheet and requested_sheet in wb.sheetnames:
@@ -324,6 +377,131 @@ def detect_best_sheet_and_headers(wb, requested_sheet=None, column_mapping=None)
             if any(len(a) >= 3 and re.search(r'\b' + re.escape(a) + r'\b', h_clean) for a in aliases):
                 mapping[field] = c_idx
                 break
+
+    # Pass 5: Content-based auto-detection for unmapped columns (samples data rows to detect types)
+    max_sample_r = min(best_row_idx + 25, best_ws.max_row) if best_ws.max_row else best_row_idx
+    if max_sample_r > best_row_idx:
+        sample_rows_data = []
+        for r in range(best_row_idx + 1, max_sample_r + 1):
+            row_vals = [best_ws.cell(r, c).value for c in range(1, best_ws.max_column + 1)]
+            sample_rows_data.append(row_vals)
+
+        unmapped_cols = [c for c in range(1, best_ws.max_column + 1) if c not in mapping.values()]
+
+        # 5a. Detect coordinates / Google Map URLs
+        if 'coords' not in mapping:
+            for c in list(unmapped_cols):
+                col_vals = [str(r[c-1]).strip() for r in sample_rows_data if c-1 < len(r) and r[c-1] is not None]
+                if any(re.search(r'\b-?\d{1,3}\.\d{4,8}\s*[,/ ]\s*-?\d{1,3}\.\d{4,8}\b', v) or 'google.com/maps' in v.lower() or 'goo.gl/maps' in v.lower() or 'maps.app.goo.gl' in v.lower() for v in col_vals):
+                    mapping['coords'] = c
+                    unmapped_cols.remove(c)
+                    break
+
+        # 5b. Detect availability / dates
+        if 'avail' not in mapping:
+            for c in list(unmapped_cols):
+                col_vals = [r[c-1] for r in sample_rows_data if c-1 < len(r) and r[c-1] is not None]
+                has_dates = 0
+                for v in col_vals:
+                    if hasattr(v, 'strftime'):
+                        has_dates += 1
+                    else:
+                        sv = str(v).strip().lower()
+                        if re.search(r'\b\d{1,2}[./\-]\d{1,2}[./\-]\d{2,4}\b', sv) or any(w in sv for w in ('available', 'vacant', 'booked', 'ready')):
+                            has_dates += 1
+                if col_vals and (has_dates / len(col_vals)) >= 0.25:
+                    mapping['avail'] = c
+                    unmapped_cols.remove(c)
+                    break
+
+        # 5c. Detect size / dimensions (e.g. 30x10, 40*20)
+        if 'size' not in mapping and 'w' not in mapping:
+            for c in list(unmapped_cols):
+                col_vals = [str(r[c-1]).strip().lower() for r in sample_rows_data if c-1 < len(r) and r[c-1] is not None]
+                if any(re.search(r'\b\d{1,3}\s*[xX*×]\s*\d{1,3}\b', v) for v in col_vals):
+                    mapping['size'] = c
+                    unmapped_cols.remove(c)
+                    break
+
+        # 5d. Detect rates / monthly fees (numbers >= 5000 or formatted with currency)
+        if 'rate' not in mapping:
+            for c in list(unmapped_cols):
+                col_vals = [r[c-1] for r in sample_rows_data if c-1 < len(r) and r[c-1] is not None]
+                rate_matches = 0
+                for v in col_vals:
+                    sv = str(v).strip()
+                    if re.search(r'[₹$]|rs\.?|/-', sv, re.I):
+                        rate_matches += 1
+                    else:
+                        try:
+                            num = float(re.sub(r'[^\d.]', '', sv))
+                            if num >= 5000:
+                                rate_matches += 1
+                        except Exception:
+                            pass
+                if col_vals and (rate_matches / len(col_vals)) >= 0.3:
+                    mapping['rate'] = c
+                    unmapped_cols.remove(c)
+                    break
+
+        # 5e. Detect illumination (FL, BL, NL, Frontlit, Backlit, Non lit)
+        if 'light' not in mapping:
+            for c in list(unmapped_cols):
+                col_vals = [str(r[c-1]).strip().lower() for r in sample_rows_data if c-1 < len(r) and r[c-1] is not None]
+                if any(v in ('fl', 'bl', 'nl', 'frontlit', 'backlit', 'non lit', 'non-lit', 'front lit', 'back lit', 'led') for v in col_vals):
+                    mapping['light'] = c
+                    unmapped_cols.remove(c)
+                    break
+
+        # 5f. Detect media types (Hoarding, Unipole, Gantry, Cantilever, etc.)
+        if 'media' not in mapping:
+            for c in list(unmapped_cols):
+                col_vals = [str(r[c-1]).strip().lower() for r in sample_rows_data if c-1 < len(r) and r[c-1] is not None]
+                if any(any(m in v for m in ('hoarding', 'unipole', 'gantry', 'cantilever', 'fob', 'kiosk', 'digital', 'billboard')) for v in col_vals):
+                    mapping['media'] = c
+                    unmapped_cols.remove(c)
+                    break
+
+        # 5g. Detect city
+        if 'city' not in mapping:
+            for c in list(unmapped_cols):
+                col_vals = [str(r[c-1]).strip() for r in sample_rows_data if c-1 < len(r) and r[c-1] is not None]
+                if any(detect_city(v) != 'Ahmedabad' or v.lower() == 'ahmedabad' for v in col_vals if v):
+                    mapping['city'] = c
+                    unmapped_cols.remove(c)
+                    break
+
+        # 5h. Detect site code / serial numbers
+        if 'code' not in mapping:
+            for c in list(unmapped_cols):
+                col_vals = [str(r[c-1]).strip().upper() for r in sample_rows_data if c-1 < len(r) and r[c-1] is not None]
+                if any(re.search(r'\b[A-Za-z]{1,6}\s*[-–—]\s*\d{1,5}\b', v) for v in col_vals):
+                    mapping['code'] = c
+                    unmapped_cols.remove(c)
+                    break
+
+        # 5i. Location Auto-Detection Guarantee!
+        if 'location' not in mapping and unmapped_cols:
+            best_loc_c = None
+            best_loc_score = -1
+            landmark_words = ('road', 'marg', 'cross', 'circle', 'near', 'opp', 'beside', 'bridge', 'flyover', 'station', 'highway', 'nagar', 'complex', 'mall', 'chokdi', 'bhavan', 'gate', 'corner', 'square', 'b/h', 'o/s', 'nr.', 'opp.')
+            for c in unmapped_cols:
+                col_vals = [str(r[c-1]).strip() for r in sample_rows_data if c-1 < len(r) and r[c-1] is not None]
+                if not col_vals: continue
+                kw_matches = sum(1 for v in col_vals if any(kw in v.lower() for kw in landmark_words))
+                avg_len = sum(len(v) for v in col_vals) / len(col_vals)
+                is_num = all(re.match(r'^-?\d+(?:\.\d+)?$', v) for v in col_vals if v)
+                if is_num: continue
+                score = (kw_matches * 10) + avg_len
+                if score > best_loc_score and avg_len > 8:
+                    best_loc_score = score
+                    best_loc_c = c
+            if best_loc_c:
+                mapping['location'] = best_loc_c
+                unmapped_cols.remove(best_loc_c)
+            elif unmapped_cols:
+                longest_c = max(unmapped_cols, key=lambda c: sum(len(str(r[c-1])) for r in sample_rows_data if c-1 < len(r) and r[c-1] is not None))
+                mapping['location'] = longest_c
 
     return best_ws, best_row_idx, best_headers, mapping
 
@@ -1032,6 +1210,16 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
 
         # Availability parsing
         avail = format_excel_date(avail_raw) if avail_raw else "Available"
+        if not avail_raw or avail == "Available":
+            for c_i in range(1, ws.max_column + 1):
+                rv = ws.cell(r, c_i).value
+                if hasattr(rv, 'strftime'):
+                    avail = format_excel_date(rv)
+                    break
+                elif rv and isinstance(rv, str):
+                    if re.search(r'\b\d{1,2}[./\-]\d{1,2}[./\-]\d{2,4}\b', rv) or any(w in rv.lower() for w in ('vacant', 'booked till', 'available from')):
+                        avail = format_excel_date(rv)
+                        break
 
         # Coords parsing
         coords = format_gps_coords(coords_raw, lat_val, lng_val)
@@ -1039,8 +1227,27 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
             m_geo = re.search(r'\b(\d{1,2}\.\d{4,8}\s*,\s*\d{1,2}\.\d{4,8})\b', loc)
             if m_geo:
                 coords = m_geo.group(1).strip()
+        if not coords:
+            for c_i in range(1, ws.max_column + 1):
+                cv = str(ws.cell(r, c_i).value or '').strip()
+                if not cv: continue
+                m_c = re.search(r'(-?\d{1,3}\.\d{4,8})\s*[,/ ]\s*(-?\d{1,3}\.\d{4,8})', urllib.parse.unquote(cv))
+                if m_c:
+                    coords = f"{float(m_c.group(1)):.6f}, {float(m_c.group(2)):.6f}"
+                    break
 
         rate_str = format_inr(rate_val) if rate_val else ""
+
+        # Fallback location from any text cell in row if loc is missing
+        if not loc:
+            best_t = ""
+            for c_i in range(1, ws.max_column + 1):
+                cv = str(ws.cell(r, c_i).value or '').strip()
+                if not cv: continue
+                if len(cv) > len(best_t) and not re.match(r'^-?\d+(?:\.\d+)?$', cv) and cv.lower() not in ('bl', 'fl', 'nl', 'available', 'vacant', 'booked'):
+                    best_t = cv
+            if best_t:
+                loc = best_t
 
         # Clean location without altering actual listing information (remove site codes and dates)
         cleaned_loc = clean_location(loc, size_str=size_str, code_str=code_val or code_str, city_str=city) if loc else ""
@@ -1496,8 +1703,9 @@ def generate_converted_pptx_pure(template_file, output_path, entries, is_excel=F
         slide_xml = slide_xml.replace('Gantry', saxutils.escape(mtype))
         slide_xml = slide_xml.replace('BL', saxutils.escape(illum))
         slide_xml = slide_xml.replace('₹ 2,25,000/-', saxutils.escape(rate))
-        # Rule: In PPT conversion (or when coords is empty), omit coordinates completely from presentation
-        if not is_excel or not coords:
+        # If coords is empty (e.g. pure PPT upload with no coords), remove Location Coordinates block
+        # If coords is present (from Excel conversion or companion Excel), populate it!
+        if not coords:
             slide_xml = re.sub(
                 r'<a:p[ >](?:(?!<a:p[ >]).)*?Location Coordinates:(?:(?!<a:p[ >]).)*?</a:p>',
                 '',
