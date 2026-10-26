@@ -18,6 +18,7 @@ export default function PptConverterView() {
   const [progressPercent, setProgressPercent] = useState(0);
   const [progressMessage, setProgressMessage] = useState('');
   const [conversionResult, setConversionResult] = useState(null);
+  const [customFileName, setCustomFileName] = useState('Converted_MediaBuzz_Master_Format');
   const [error, setError] = useState(null);
 
   // Slide preview state
@@ -176,6 +177,8 @@ export default function PptConverterView() {
 
       setTimeout(() => {
         setConversionResult(res.data);
+        const defaultName = file?.name ? file.name.replace(/\.[^/.]+$/, '') + '_MediaBuzz' : 'Converted_MediaBuzz_Master_Format';
+        setCustomFileName(defaultName);
         setActiveSlideIndex(0);
         setConverting(false);
       }, 500);
@@ -194,13 +197,16 @@ export default function PptConverterView() {
   const handleDownload = async () => {
     if (!conversionResult?.downloadId) return;
     try {
-      const downloadUrl = `/api/ppt-converter/download/${conversionResult.downloadId}`;
+      const cleanBase = (customFileName || 'Converted_MediaBuzz_Master_Format').trim().replace(/\.pptx$/i, '');
+      const cleanName = `${cleanBase}.pptx`;
+      // Use /ppt-converter/download without duplicate /api prefix (baseURL already includes /api)
+      const downloadUrl = `/ppt-converter/download/${encodeURIComponent(conversionResult.downloadId)}?name=${encodeURIComponent(cleanName)}`;
       const res = await api.get(downloadUrl, { responseType: 'blob' });
       const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = conversionResult.downloadName || 'Converted_MediaBuzz_Master_Format.pptx';
+      a.download = cleanName;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -520,25 +526,49 @@ export default function PptConverterView() {
               </div>
             </div>
 
-            <div className="scooh-ppt-success-actions">
-              <button
-                type="button"
-                className="scooh-btn primary"
-                onClick={handleDownload}
-                id="btn-download-converted-main"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
-                </svg>
-                Download Converted_MediaBuzz_Master_Format.pptx
-              </button>
-              <button
-                type="button"
-                className="scooh-btn ghost"
-                onClick={handleReset}
-              >
-                Convert Another
-              </button>
+            <div className="scooh-ppt-success-actions" style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '320px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(255,255,255,0.06)', borderRadius: '6px', border: '1px solid var(--mb-border)', padding: '2px 10px' }}>
+                <span style={{ fontSize: '11px', color: 'var(--mb-primary)', fontWeight: 700, marginRight: '8px', letterSpacing: '0.5px' }}>RENAME:</span>
+                <input
+                  type="text"
+                  value={customFileName}
+                  onChange={(e) => setCustomFileName(e.target.value)}
+                  placeholder="Presentation Name"
+                  title="Click to rename presentation before downloading"
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#ffffff',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    outline: 'none',
+                    flex: 1,
+                    padding: '6px 0'
+                  }}
+                />
+                <span style={{ fontSize: '11px', color: 'var(--mb-muted)', fontWeight: 600 }}>.pptx</span>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="scooh-btn primary"
+                  onClick={handleDownload}
+                  id="btn-download-converted-main"
+                  style={{ flex: 1 }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+                  </svg>
+                  Download Presentation
+                </button>
+                <button
+                  type="button"
+                  className="scooh-btn ghost"
+                  onClick={handleReset}
+                >
+                  Convert Another
+                </button>
+              </div>
             </div>
           </div>
 
@@ -708,12 +738,7 @@ export default function PptConverterView() {
 
                     <div className="scooh-statline">
                       <span>Site Identifier:</span>
-                      <b>Site {activeSlide.siteNumber}</b>
-                    </div>
-
-                    <div className="scooh-statline">
-                      <span>Site Code:</span>
-                      <b style={{ color: 'var(--mb-primary)' }}>{activeSlide.code || `MB - ${String(activeSlide.siteNumber).padStart(2, '0')}`}</b>
+                      <b style={{ color: 'var(--mb-primary)' }}>Site {activeSlide.siteNumber}</b>
                     </div>
 
                     <div className="scooh-statline">

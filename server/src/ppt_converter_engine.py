@@ -97,19 +97,52 @@ def detect_city(text):
     return 'Ahmedabad'
 
 def clean_location(text, size_str=None, code_str=None, city_str=None):
-    lines = [ln.strip() for ln in text.split('\n') if ln.strip()]
-    cleaned = []
-    for ln in lines:
-        if re.search(r'^(size|dimensions?|media|type|illum|rate|cost|avail|location|coordinates|site\s*#?):', ln, re.IGNORECASE):
-            continue
-        if re.search(r'\b(mediabuzz|outdoor|be seen|all rights reserved)\b', ln, re.IGNORECASE):
-            continue
-        if size_str and size_str.lower() in ln.lower():
-            continue
-        cleaned.append(ln)
-    res = ' '.join(cleaned).strip()
-    res = re.sub(r'\s+', ' ', res)
+    s = text
+    # 1. Remove explicit prefixes/labels
+    s = re.sub(r'(?i)\b(location|address|site\s*(?:code|no|#)?|size|dimension[s]?|media(?:\s*type)?|type|illum(?:ination)?|lighting|rate|adv\.?\s*(?:fee|cost)|cost|rental|avail(?:ability)?|coordinates?|latitude|longitude|lat|long|gps|facing|traffic)\s*[:\-–—]?\b', ' ', s)
+    # 2. Remove any site codes: MB-01, SITE 1, LOC-2, AMD-001, etc.
+    s = re.sub(r'(?i)\b(?:mb|site|loc|spot|amd|gantry|hoarding|unipole)[\s#\-–—]*\d+\b', ' ', s)
+    # 3. Remove sizes & dimensions: 30x10, 40*20 ft, 1500 sq ft, etc.
+    s = re.sub(r'\b\d{1,4}(?:\.\d+)?\s*[xX*×]\s*\d{1,4}(?:\.\d+)?(?:\s*(?:ft|feet|FT|m|meter|M|sq\.?\s*ft|sqft))?\b', ' ', s)
+    s = re.sub(r'(?i)\b\d{2,6}\s*(?:sq\.?\s*ft|sqft|feet)\b', ' ', s)
+    if size_str:
+        s = re.sub(re.escape(size_str), ' ', s, flags=re.IGNORECASE)
+    if code_str:
+        s = re.sub(re.escape(code_str), ' ', s, flags=re.IGNORECASE)
+    # 4. Remove rates and rate terms
+    s = re.sub(r'(?i)(?:₹|rs\.?|inr)\s*[\d,]+(?:\s*/-|\s*per\s*month)?', ' ', s)
+    s = re.sub(r'\b\d{1,3}(?:,\d{2,3})+(?:\s*/-)?\b', ' ', s)
+    s = re.sub(r'(?i)\b(per\s*month|per\s*day|\bp\.?m\.?\b|rental|adv\.?\s*(?:fee|cost)?|fee|fees|cost|rate)\b', ' ', s)
+    # 5. Remove media types and illumination words
+    s = re.sub(r'(?i)\b(hoarding|unipole|gantry|cantilever|bridge\s*panel|fob|kiosk|digital|dooh|led|billboard)\b', ' ', s)
+    s = re.sub(r'(?i)\b(front\s*lit|back\s*lit|non\s*lit|\bbl\b|\bfl\b|\bnl\b)\b', ' ', s)
+    # 6. Remove coordinates
+    s = re.sub(r'\b\d{1,2}\.\d{4,8}\s*,\s*\d{1,2}\.\d{4,8}\b', ' ', s)
+    # 7. Remove common status words
+    s = re.sub(r'(?i)\b(available(?:\s+from|\s+till|\s+now)?|booked(?:\s+till)?|ready\s+to\s+book)\b', ' ', s)
+    # 8. Remove brand names & slogans
+    s = re.sub(r'(?i)\b(mediabuzz|outdoor|be seen|all rights reserved)\b', ' ', s)
+    # 9. Clean up whitespace and punctuation
+    s = re.sub(r'[\r\n\t]+', ' ', s)
+    s = re.sub(r'\s*[,;:\-–—|/]+\s*', ', ', s)
+    s = re.sub(r'^\s*\d+[\s.\-–—]+', '', s)
+    s = re.sub(r'\s+', ' ', s).strip(', -–—:')
+    # 10. Remove duplicate consecutive words (e.g. 'Ahmedabad Ahmedabad' -> 'Ahmedabad')
+    words = s.split()
+    dedup = []
+    for w in words:
+        clean_w = re.sub(r'^[^\w]+|[^\w]+$', '', w).lower()
+        if not dedup or clean_w != re.sub(r'^[^\w]+|[^\w]+$', '', dedup[-1]).lower():
+            dedup.append(w)
+    res = ' '.join(dedup).strip(', -–—:')
+    res = re.sub(r'^\d+[\s.\-–—]+', '', res).strip(', -–—:')
+    # 11. If city repeated at the very end, remove it
+    if city_str and res.lower().endswith(city_str.lower()):
+        res = re.sub(r'(?i),\s*' + re.escape(city_str) + r'$', '', res).strip(', -–—:')
     return res[:120] if res else (f"Near {city_str} Hub" if city_str else "Prime Billboard Location")
+
+
+
 
 def detect_media_type(text):
     types = [
@@ -244,11 +277,9 @@ def generate_slide_thumbnail(photo_bytes, site_num, code, size, location, city="
             draw.text((lb_x + 28, lb_y + 24), "Be Seen", fill=(3, 3, 82))
             
             rx = 447
-            draw.text((rx, 42), f"Site {site_num}", fill=(255, 255, 255))
-            
-            bx, by, bw, bh = rx, 63, 160, 43
+            bx, by, bw, bh = rx, 54, 150, 44
             draw.rounded_rectangle([bx, by, bx+bw, by+bh], radius=8, fill=(255, 194, 0))
-            draw.text((bx + 18, by + 12), code or f"MB - {site_num:02d}", fill=(0, 0, 0))
+            draw.text((bx + 18, by + 12), f"Site {site_num}", fill=(0, 0, 0))
             
             draw.text((rx, 118), city or "Ahmedabad", fill=(255, 255, 255))
             draw.text((rx, 148), location[:44] if location else "Location Details", fill=(255, 255, 255))
@@ -313,10 +344,10 @@ def extract_entries_pure_zip(input_path):
             if full_text.lower() in ['mediabuzzoutdoor.com', 'thank you', 'thanks', 'contact us', 'thank you!']:
                 continue
                 
-            code = extract_code(full_text, len(entries) + 1)
             size = extract_size(full_text)
             city = detect_city(full_text)
-            loc = clean_location(full_text, size, code, city)
+            site_num_label = f"Site {len(entries) + 1}"
+            loc = clean_location(full_text, size, None, city)
             mtype = detect_media_type(full_text)
             illum = detect_illumination(full_text)
             rate = detect_rate(full_text)
@@ -359,7 +390,7 @@ def extract_entries_pure_zip(input_path):
             entries.append({
                 'source_slide': slide_idx,
                 'photo_bytes': photo_bytes,
-                'code': code,
+                'code': site_num_label,
                 'size': size or '30x10 ft',
                 'location': loc or 'Prime City Location',
                 'city': city or 'Ahmedabad',
@@ -437,13 +468,14 @@ def generate_converted_pptx_pure(template_file, output_path, entries):
         slide_xml = base_slide_xml_str
         rels_xml = base_rels_xml_str
 
-        slide_xml = re.sub(r'(<a:t[^>]*>)Site\s*\d+(</a:t>)', rf'\g<1>Site {site_num}\2', slide_xml, count=1)
+        site_label = f"Site {site_num}"
+        # Shape 0: Clear the redundant small text above the badge so it is not repeated
+        slide_xml = re.sub(r'(<a:t[^>]*>)Site\s*\d+(</a:t>)', r'\g<1>\g<2>', slide_xml, count=1)
 
-        code = entry.get('code') or f"MB - {site_num:02d}"
-        slide_xml = slide_xml.replace('MB - 07', saxutils.escape(code))
-        raw_code = code.replace(' ', '')
+        # Yellow badge (Shape 2): Highlight "Site 1", "Site 2" without any artificial site code
+        slide_xml = slide_xml.replace('MB - 07', saxutils.escape(site_label))
         rels_xml = re.sub(r'Target="https://panel\.mediabuzzoutdoor\.com/campaigns\?site=[^"]*"',
-                          f'Target="https://panel.mediabuzzoutdoor.com/campaigns?site={saxutils.escape(raw_code)}"',
+                          'Target="https://panel.mediabuzzoutdoor.com/campaigns"',
                           rels_xml)
 
         city = entry.get('city') or 'Ahmedabad'

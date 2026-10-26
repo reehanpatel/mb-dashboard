@@ -1043,7 +1043,7 @@ app.post('/api/ppt-converter/convert', auth, upload.single('file'), (req, res) =
   });
 });
 
-app.get('/api/ppt-converter/download/:downloadId', auth, (req, res) => {
+app.get(['/api/ppt-converter/download/:downloadId', '/api/api/ppt-converter/download/:downloadId'], auth, (req, res) => {
   const downloadId = path.basename(req.params.downloadId || '');
   if (!downloadId || !downloadId.endsWith('.pptx')) {
     return res.status(400).send('Invalid download identifier.');
@@ -1052,10 +1052,18 @@ app.get('/api/ppt-converter/download/:downloadId', auth, (req, res) => {
   if (!fs.existsSync(filePath)) {
     return res.status(404).send('Converted file expired or not found.');
   }
-  res.setHeader('Content-Disposition', 'attachment; filename="Converted_MediaBuzz_Master_Format.pptx"');
+
+  let outName = (req.query.name || req.query.filename || 'Converted_MediaBuzz_Master_Format.pptx').trim();
+  outName = outName.replace(/[^\w\s\-\.]/gi, '_').replace(/\s+/g, '_');
+  if (!outName.toLowerCase().endsWith('.pptx')) {
+    outName += '.pptx';
+  }
+
+  res.setHeader('Content-Disposition', `attachment; filename="${outName}"`);
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
   res.sendFile(filePath);
 });
+
 
 app.get('/api/ppt-converter/template/download', auth, (req, res) => {
   const tmplInfo = getMasterTemplateInfo();
