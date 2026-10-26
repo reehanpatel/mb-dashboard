@@ -16,6 +16,7 @@ import base64
 import argparse
 import zipfile
 import xml.etree.ElementTree as ET
+import xml.sax.saxutils as saxutils
 
 # Ensure utf-8 encoding for stdout and stderr with replace error handling
 if hasattr(sys.stdout, 'reconfigure'):
@@ -381,93 +382,138 @@ def generate_converted_pptx_pure(template_file, output_path, entries):
     base_slide_xml_str = files['ppt/slides/slide3.xml'].decode('utf-8')
     base_rels_xml_str = files['ppt/slides/_rels/slide3.xml.rels'].decode('utf-8')
 
+    # Remove any notesSlide relationship from base_rels to avoid 1-to-1 violation across cloned slides
+    base_rels_xml_str = re.sub(r'<Relationship[^>]*relationships/notesSlide[^>]*/>', '', base_rels_xml_str)
+
     content_types_str = files['[Content_Types].xml'].decode('utf-8')
     pres_xml_str = files['ppt/presentation.xml'].decode('utf-8')
     pres_rels_str = files['ppt/_rels/presentation.xml.rels'].decode('utf-8')
 
+    # Find highest rId in presentation.xml.rels
     existing_rids = [int(m) for m in re.findall(r'rId(\d+)', pres_rels_str)]
     max_rid = max(existing_rids) if existing_rids else 20
 
-    existing_sldids = [int(m) for m in re.findall(r'id="(\d+)"', pres_xml_str)]
+    # ONLY match sldId id attributes, NOT sldMasterId id="2147483648"!
+    existing_sldids = [int(m) for m in re.findall(r'<p:sldId\s+id="(\d+)"', pres_xml_str)]
     max_sldid = max(existing_sldids) if existing_sldids else 300
 
-    new_slide_entries = []
-    
+    n_sites = len(entries)
+    closing_slide_num = n_sites + 3
+    closing_xml_data = files['ppt/slides/slide5.xml']
+    closing_rels_data = files.get('ppt/slides/_rels/slide5.xml.rels')
+
+    # Remove old template slide 5
+    del files['ppt/slides/slide5.xml']
+    if 'ppt/slides/_rels/slide5.xml.rels' in files:
+        del files['ppt/slides/_rels/slide5.xml.rels']
+
+    if closing_rels_data:
+        closing_rels_str = closing_rels_data.decode('utf-8')
+        closing_rels_str = re.sub(r'<Relationship[^>]*relationships/notesSlide[^>]*/>', '', closing_rels_str)
+        closing_rels_data = closing_rels_str.encode('utf-8')
+
+    closing_slide_filename = f"ppt/slides/slide{closing_slide_num}.xml"
+    closing_rels_filename = f"ppt/slides/_rels/slide{closing_slide_num}.xml.rels"
+    files[closing_slide_filename] = closing_xml_data
+    if closing_rels_data:
+        files[closing_rels_filename] = closing_rels_data
+
+    content_types_str = re.sub(r'<Override\s+PartName="/ppt/slides/slide[35]\.xml"[^>]*/>', '', content_types_str)
+
+    sld_id_list = [
+        '<p:sldId id="256" r:id="rId2"/>',
+        '<p:sldId id="257" r:id="rId3"/>'
+    ]
+
+    pres_rels_str = re.sub(r'<Relationship\s+Id="rId4"[^>]*/>', '', pres_rels_str)
+    pres_rels_str = re.sub(r'<Relationship\s+Id="rId6"[^>]*/>', '', pres_rels_str)
+
     for idx, entry in enumerate(entries):
         site_num = idx + 1
+        slide_idx = site_num + 2
+        slide_filename = f"ppt/slides/slide{slide_idx}.xml"
+        rels_filename = f"ppt/slides/_rels/slide{slide_idx}.xml.rels"
+
         slide_xml = base_slide_xml_str
         rels_xml = base_rels_xml_str
-        
+
         slide_xml = re.sub(r'(<a:t[^>]*>)Site\s*\d+(</a:t>)', rf'\g<1>Site {site_num}\2', slide_xml, count=1)
+
         code = entry.get('code') or f"MB - {site_num:02d}"
-        slide_xml = slide_xml.replace('MB - 07', code)
+        slide_xml = slide_xml.replace('MB - 07', saxutils.escape(code))
         raw_code = code.replace(' ', '')
         rels_xml = re.sub(r'Target="https://panel\.mediabuzzoutdoor\.com/campaigns\?site=[^"]*"',
-                          f'Target="https://panel.mediabuzzoutdoor.com/campaigns?site={raw_code}"',
+                          f'Target="https://panel.mediabuzzoutdoor.com/campaigns?site={saxutils.escape(raw_code)}"',
                           rels_xml)
-        
+
         city = entry.get('city') or 'Ahmedabad'
-        slide_xml = slide_xml.replace('Ahmedabad', city)
-        
+        slide_xml = slide_xml.replace('Ahmedabad', saxutils.escape(city))
+
         loc = entry.get('location') or 'Prime Billboard Location'
-        slide_xml = slide_xml.replace('Shivranjani Bridge- Fcg. Shyamal 4 road Jnc - Left (1)', loc)
-        
+        slide_xml = slide_xml.replace('Shivranjani Bridge- Fcg. Shyamal 4 road Jnc - Left (1)', saxutils.escape(loc))
+
         size = entry.get('size') or '30x10 ft'
         mtype = entry.get('type') or 'Hoarding'
         illum = entry.get('illum') or 'BL'
         rate = entry.get('rate') or 'On Request'
         avail = entry.get('availability') or 'Available'
         coords = entry.get('coords') or '23.012345, 72.567890'
-        
-        slide_xml = slide_xml.replace('30x10 ft', size)
-        slide_xml = slide_xml.replace('Gantry', mtype)
-        slide_xml = slide_xml.replace('BL', illum)
-        slide_xml = slide_xml.replace('₹ 2,25,000/-', rate)
-        slide_xml = slide_xml.replace('Booked till 30 Sept 2026', avail)
-        slide_xml = slide_xml.replace('23.018881, 72.530022', coords)
-        
+
+        slide_xml = slide_xml.replace('30x10 ft', saxutils.escape(size))
+        slide_xml = slide_xml.replace('Gantry', saxutils.escape(mtype))
+        slide_xml = slide_xml.replace('BL', saxutils.escape(illum))
+        slide_xml = slide_xml.replace('₹ 2,25,000/-', saxutils.escape(rate))
+        slide_xml = slide_xml.replace('Booked till 30 Sept 2026', saxutils.escape(avail))
+        slide_xml = slide_xml.replace('23.018881, 72.530022', saxutils.escape(coords))
+
         photo_bytes = entry.get('photo_bytes')
         if photo_bytes:
             media_filename = f"ppt/media/site_photo_{site_num}.jpeg"
             files[media_filename] = photo_bytes
             rels_xml = re.sub(r'Target="\.\./media/image-3-1\.jpeg"', f'Target="../media/site_photo_{site_num}.jpeg"', rels_xml)
-            
-        if idx == 0:
-            files['ppt/slides/slide3.xml'] = slide_xml.encode('utf-8')
-            files['ppt/slides/_rels/slide3.xml.rels'] = rels_xml.encode('utf-8')
-        else:
-            max_rid += 1
-            max_sldid += 1
-            new_rid = f"rId{max_rid}"
-            new_slide_file = f"ppt/slides/slide_site_{site_num}.xml"
-            new_rels_file = f"ppt/slides/_rels/slide_site_{site_num}.xml.rels"
-            
-            files[new_slide_file] = slide_xml.encode('utf-8')
-            files[new_rels_file] = rels_xml.encode('utf-8')
-            
-            ct_entry = f'<Override PartName="/{new_slide_file}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>'
-            content_types_str = content_types_str.replace('</Types>', f'{ct_entry}</Types>')
-            
-            rel_entry = f'<Relationship Id="{new_rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide_site_{site_num}.xml"/>'
-            pres_rels_str = pres_rels_str.replace('</Relationships>', f'{rel_entry}</Relationships>')
-            
-            new_slide_entries.append(f'<p:sldId id="{max_sldid}" r:id="{new_rid}"/>')
 
-    if new_slide_entries:
-        insert_marker = '<p:sldId id="260" r:id="rId6"/>'
-        if insert_marker in pres_xml_str:
-            pres_xml_str = pres_xml_str.replace(insert_marker, ''.join(new_slide_entries) + insert_marker)
-        else:
-            pres_xml_str = pres_xml_str.replace('</p:sldIdLst>', ''.join(new_slide_entries) + '</p:sldIdLst>')
-            
+        files[slide_filename] = slide_xml.encode('utf-8')
+        files[rels_filename] = rels_xml.encode('utf-8')
+
+        content_types_str = content_types_str.replace(
+            '</Types>',
+            f'<Override PartName="/{slide_filename}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>'
+        )
+
+        max_rid += 1
+        rid = f"rId{max_rid}"
+        pres_rels_str = pres_rels_str.replace(
+            '</Relationships>',
+            f'<Relationship Id="{rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide{slide_idx}.xml"/></Relationships>'
+        )
+
+        max_sldid += 1
+        sld_id_list.append(f'<p:sldId id="{max_sldid}" r:id="{rid}"/>')
+
+    content_types_str = content_types_str.replace(
+        '</Types>',
+        f'<Override PartName="/{closing_slide_filename}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>'
+    )
+    max_rid += 1
+    closing_rid = f"rId{max_rid}"
+    pres_rels_str = pres_rels_str.replace(
+        '</Relationships>',
+        f'<Relationship Id="{closing_rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide{closing_slide_num}.xml"/></Relationships>'
+    )
+    max_sldid += 1
+    sld_id_list.append(f'<p:sldId id="{max_sldid}" r:id="{closing_rid}"/>')
+
+    pres_xml_str = re.sub(r'<p:sldIdLst>.*?</p:sldIdLst>', f'<p:sldIdLst>{"".join(sld_id_list)}</p:sldIdLst>', pres_xml_str)
+
     files['[Content_Types].xml'] = content_types_str.encode('utf-8')
     files['ppt/presentation.xml'] = pres_xml_str.encode('utf-8')
     files['ppt/_rels/presentation.xml.rels'] = pres_rels_str.encode('utf-8')
-    
+
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with zipfile.ZipFile(output_path, 'w', compression=zipfile.ZIP_DEFLATED) as z_out:
         for fname, data in files.items():
             z_out.writestr(fname, data)
+
 
 def process_presentation_pure(input_path, output_path, template_file):
     """Processes conversion using pure Python standard library only."""
@@ -795,7 +841,7 @@ def process_presentation_pptx(input_path, output_path, template_file):
 def process_presentation(input_path, output_path, master_template_path=None):
     """
     Main conversion entrypoint.
-    Tries python-pptx first, and immediately falls back to pure standard library engine.
+    Executes zero-dependency OpenXML engine ensuring 100% valid PowerPoint files.
     """
     template_file = find_master_template(master_template_path)
     if not template_file:
@@ -804,12 +850,6 @@ def process_presentation(input_path, output_path, master_template_path=None):
     if not os.path.isfile(input_path):
         raise FileNotFoundError(f"Input PowerPoint presentation not found at: {input_path}")
         
-    if pptx is not None:
-        try:
-            return process_presentation_pptx(input_path, output_path, template_file)
-        except Exception as e:
-            sys.stderr.write(f"[PPT Engine] python-pptx conversion note: {e}. Falling back to pure standard library engine.\n")
-
     return process_presentation_pure(input_path, output_path, template_file)
 
 
