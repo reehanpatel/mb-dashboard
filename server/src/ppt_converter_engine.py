@@ -2020,6 +2020,97 @@ def generate_converted_pptx_pure(template_file, output_path, entries, is_excel=F
             z_out.writestr(fname, data)
 
 
+def process_excel_only(input_path, output_path, mapping=None, sheet_name=None, manual_city=None, custom_name=None):
+    """
+    Directly converts any uploaded Excel workbook into the 11-column Master Excel workbook (Jade Blue 16-10-2026 format)
+    with top Navy & Gold brand header, official Media Buzz logo, and bottom 7-point software Terms & Conditions.
+    Does NOT generate or require any PPT template or slides.
+    Returns rich structured site data for interactive frontend preview.
+    """
+    if not os.path.isfile(input_path):
+        raise FileNotFoundError(f"Input file not found at: {input_path}")
+
+    entries, headers_detected, h_idx, mapping_used = extract_entries_from_excel(
+        input_path, column_mapping=mapping, sheet_name=sheet_name
+    )
+
+    if manual_city and str(manual_city).strip():
+        m_city = str(manual_city).strip()
+        for e in entries:
+            e['city'] = m_city
+
+    if not entries:
+        raise ValueError("Could not extract any location or billboard listings from the uploaded file.")
+
+    # Ensure output_path has .xlsx extension
+    excel_output_path = output_path
+    if not excel_output_path.lower().endswith('.xlsx'):
+        excel_output_path = re.sub(r'\.[^/.]+$', '', excel_output_path) + '.xlsx'
+
+    title = custom_name or "MEDIA BUZZ - SITES SPECIFICATION"
+    generate_master_excel(entries, excel_output_path, manual_city=manual_city, title=title)
+
+    if not os.path.isfile(excel_output_path):
+        raise RuntimeError(f"Failed to generate standardized Excel file at {excel_output_path}")
+
+    formatted_sites = []
+    total_sqft = 0
+    unique_cities = set()
+
+    for idx, e in enumerate(entries, start=1):
+        size_txt = str(e.get('size') or '').replace('ft', '').replace('FT', '').strip()
+        dim_m = re.match(r'(\d+(?:\.\d+)?)\s*[xX*×]\s*(\d+(?:\.\d+)?)', size_txt)
+        w_val = e.get('w') or (dim_m.group(1) if dim_m else "")
+        h_val = e.get('h') or (dim_m.group(2) if dim_m else "")
+        sqft_val = e.get('sq_ft') or ""
+        if not sqft_val and dim_m:
+            try:
+                sqft_val = str(int(float(dim_m.group(1)) * float(dim_m.group(2))))
+            except Exception:
+                sqft_val = ""
+
+        if sqft_val:
+            try:
+                total_sqft += int(float(str(sqft_val).replace(',', '')))
+            except Exception:
+                pass
+
+        city_name = manual_city or e.get('city') or 'Ahmedabad'
+        if city_name:
+            unique_cities.add(city_name)
+
+        formatted_sites.append({
+            'srNo': idx,
+            'city': city_name,
+            'location': e.get('location') or '',
+            'media': e.get('type') or 'Hoarding',
+            'light': e.get('illum') or 'BL',
+            'w': str(w_val),
+            'h': str(h_val),
+            'sqFt': str(sqft_val),
+            'availability': e.get('availability') or 'Available',
+            'rate': e.get('rate') or '',
+            'coords': e.get('coords') or ''
+        })
+
+    return {
+        'success': True,
+        'isExcel': True,
+        'isExcelOnly': True,
+        'excelGenerated': True,
+        'totalSites': len(entries),
+        'totalSqFt': total_sqft,
+        'cities': sorted(list(unique_cities)),
+        'manualCity': manual_city or None,
+        'customName': custom_name or None,
+        'sites': formatted_sites,
+        'headers': headers_detected,
+        'mapping': mapping_used,
+        'softwareTerms': OFFICIAL_SOFTWARE_TERMS,
+        'message': f"Successfully converted {len(entries)} billboard sites into standardized Media Buzz Master Excel format."
+    }
+
+
 def process_presentation_pure(input_path, output_path, template_file, mapping=None, sheet_name=None, companion_excel=None, manual_city=None, custom_name=None, include_terms=True):
     """Processes conversion for PPTX or Excel using pure Python standard library & OpenXML."""
     is_excel = input_path.lower().endswith(('.xlsx', '.xls'))
@@ -2447,6 +2538,7 @@ def main():
     parser.add_argument('--manual-city', type=str, help="Manual city override or default city")
     parser.add_argument('--custom-name', type=str, help="Custom name for output presentation and Excel")
     parser.add_argument('--no-terms', action='store_true', help="Omit Terms & Conditions slide from output presentation")
+    parser.add_argument('--excel-only', action='store_true', help="Directly produce standardized Master Excel workbook (.xlsx) without PPTX generation")
     args = parser.parse_args()
     
     if args.check_template:
@@ -2488,17 +2580,27 @@ def main():
         sys.exit(1)
         
     try:
-        res = process_presentation(
-            args.input,
-            args.output,
-            args.template,
-            mapping=col_mapping,
-            sheet_name=args.sheet,
-            companion_excel=args.companion_excel,
-            manual_city=args.manual_city,
-            custom_name=args.custom_name,
-            include_terms=not args.no_terms
-        )
+        if args.excel_only or (args.output and args.output.lower().endswith('.xlsx')):
+            res = process_excel_only(
+                args.input,
+                args.output,
+                mapping=col_mapping,
+                sheet_name=args.sheet,
+                manual_city=args.manual_city,
+                custom_name=args.custom_name
+            )
+        else:
+            res = process_presentation(
+                args.input,
+                args.output,
+                args.template,
+                mapping=col_mapping,
+                sheet_name=args.sheet,
+                companion_excel=args.companion_excel,
+                manual_city=args.manual_city,
+                custom_name=args.custom_name,
+                include_terms=not args.no_terms
+            )
         # Write full result file to disk to prevent stdout buffer overflow
         result_json_path = args.output + '.json'
         try:

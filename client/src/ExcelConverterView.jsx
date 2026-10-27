@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import api from './api';
+import { MEDIA_BUZZ_LOGO_BASE64 } from './excelLogo';
 
 // Official Media Buzz Software Terms & Conditions (Strict Single Source of Truth)
 const OFFICIAL_SOFTWARE_TERMS = [
@@ -30,16 +31,6 @@ const MASTER_TARGET_FIELDS = [
 const POPULAR_CITIES = ['Ahmedabad', 'Surat', 'Vadodara', 'Rajkot', 'Gandhinagar', 'Mumbai', 'Pune', 'Delhi NCR'];
 
 export default function ExcelConverterView() {
-  // Master template state
-  const [templateStatus, setTemplateStatus] = useState({
-    loading: true,
-    available: false,
-    filename: '',
-    size: 0,
-    masterExcel: null,
-    error: null
-  });
-
   // File upload state
   const [file, setFile] = useState(null);
   const [dragActive, setDragActive] = useState(false);
@@ -65,49 +56,8 @@ export default function ExcelConverterView() {
   const [conversionResult, setConversionResult] = useState(null);
   const [error, setError] = useState(null);
 
-  // Slide preview & inline editing state
-  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
-  const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'slideshow'
-  const [filterReviewOnly, setFilterReviewOnly] = useState(false);
-  const [editingSlideIndex, setEditingSlideIndex] = useState(null);
-  const [editedFields, setEditedFields] = useState({});
-
-  // Fetch master template status on mount
-  const checkTemplateStatus = useCallback(async () => {
-    try {
-      setTemplateStatus(prev => ({ ...prev, loading: true, error: null }));
-      const res = await api.get('/excel-converter/status');
-      setTemplateStatus({
-        loading: false,
-        available: !!res.data?.available,
-        filename: res.data?.filename || 'MediaBuzz_Master_Template.pptx',
-        size: res.data?.size || 0,
-        masterExcel: res.data?.masterExcel || {
-          available: true,
-          filename: 'Jade Blue 16-10-2026.xlsx',
-          masterColumns: MASTER_TARGET_FIELDS.map(f => f.masterCol)
-        },
-        error: null
-      });
-    } catch (err) {
-      setTemplateStatus({
-        loading: false,
-        available: false,
-        filename: 'MediaBuzz_Master_Template.pptx',
-        size: 0,
-        masterExcel: {
-          available: true,
-          filename: 'Jade Blue 16-10-2026.xlsx',
-          masterColumns: MASTER_TARGET_FIELDS.map(f => f.masterCol)
-        },
-        error: err.response?.data?.error || err.message || 'Could not verify master template'
-      });
-    }
-  }, []);
-
-  useEffect(() => {
-    checkTemplateStatus();
-  }, [checkTemplateStatus]);
+  // Table preview search filter
+  const [tableFilter, setTableFilter] = useState('');
 
   // Handle Drag & Drop
   const handleDrag = useCallback((e) => {
@@ -156,7 +106,6 @@ export default function ExcelConverterView() {
   const handleSheetChange = (newSheet) => {
     setSelectedSheet(newSheet);
     if (file) {
-      // Clear custom mapping so engine auto-maps the columns for the newly selected sheet
       inspectExcelWorkbook(file, newSheet, {});
     }
   };
@@ -164,7 +113,6 @@ export default function ExcelConverterView() {
   const handleApplyCustomMapping = () => {
     setShowMappingModal(false);
     if (file) {
-      // Re-inspect with updated custom mapping so preview rows, pills, and counts update immediately
       inspectExcelWorkbook(file, selectedSheet, columnMapping);
     }
   };
@@ -204,32 +152,32 @@ export default function ExcelConverterView() {
 
   // Convert Excel workflow
   const handleConvert = async () => {
-    if (!file || !templateStatus.available || converting) return;
+    if (!file || converting) return;
 
     setError(null);
     setConverting(true);
     setProgressStep(1);
-    setProgressPercent(15);
+    setProgressPercent(20);
     setProgressMessage('Uploading Excel workbook for conversion...');
 
     const pInterval = setInterval(() => {
       setProgressPercent(prev => {
-        if (prev < 40) return prev + 8;
-        if (prev < 75) return prev + 4;
-        if (prev < 90) return prev + 1;
+        if (prev < 45) return prev + 10;
+        if (prev < 80) return prev + 5;
+        if (prev < 95) return prev + 2;
         return prev;
       });
-    }, 400);
+    }, 300);
 
     setTimeout(() => {
       setProgressStep(2);
       setProgressMessage('Parsing billboard rows, specs & mapped columns...');
-    }, 1200);
+    }, 800);
 
     setTimeout(() => {
       setProgressStep(3);
-      setProgressMessage('Populating Media Buzz Master Template PPT and standardized Excel...');
-    }, 2800);
+      setProgressMessage('Generating clean 11-column Master Excel with Media Buzz branding...');
+    }, 1800);
 
     try {
       const fd = new FormData();
@@ -255,16 +203,15 @@ export default function ExcelConverterView() {
       clearInterval(pInterval);
       setProgressPercent(100);
       setProgressStep(4);
-      setProgressMessage('Excel conversion completed successfully!');
+      setProgressMessage('Standardized Master Excel ready to export!');
 
       setTimeout(() => {
         setConversionResult(res.data);
         if (res.data?.customName) {
           setCustomFileName(res.data.customName);
         }
-        setActiveSlideIndex(0);
         setConverting(false);
-      }, 500);
+      }, 400);
 
     } catch (err) {
       clearInterval(pInterval);
@@ -276,36 +223,18 @@ export default function ExcelConverterView() {
     }
   };
 
-  // Download converted presentation (.pptx)
-  const handleDownloadPpt = async () => {
-    if (!conversionResult?.downloadId) return;
-    try {
-      const cleanBase = (customFileName || 'Converted_MediaBuzz_Master_Format').trim().replace(/\.pptx$/i, '');
-      const cleanName = `${cleanBase}.pptx`;
-      const downloadUrl = `/excel-converter/download/${encodeURIComponent(conversionResult.downloadId)}?name=${encodeURIComponent(cleanName)}`;
-      const res = await api.get(downloadUrl, { responseType: 'blob' });
-      const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = cleanName;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (err) {
-      alert('Failed to download presentation: ' + (err.response?.data?.message || err.message));
-    }
-  };
-
   // Download standardized Excel (.xlsx)
   const handleDownloadExcel = async () => {
-    if (!conversionResult?.downloadId && !conversionResult?.excelDownloadId) return;
+    const downloadId = conversionResult?.excelDownloadId || conversionResult?.downloadId;
+    if (!downloadId) return;
+
     try {
-      const cleanBase = (customFileName || 'Converted_MediaBuzz_Master_Format').trim().replace(/\.xlsx$/i, '').replace(/\.pptx$/i, '');
+      const cleanBase = (customFileName || 'Converted_MediaBuzz_Master_Format')
+        .trim()
+        .replace(/\.xlsx$/i, '')
+        .replace(/\.pptx$/i, '');
       const cleanName = `${cleanBase}.xlsx`;
-      const downloadId = conversionResult.excelDownloadId || conversionResult.downloadId.replace(/\.pptx$/i, '.xlsx');
-      const downloadUrl = `/excel-converter/download-excel/${encodeURIComponent(downloadId)}?name=${encodeURIComponent(cleanName)}`;
+      const downloadUrl = `/excel-converter/download/${encodeURIComponent(downloadId)}?name=${encodeURIComponent(cleanName)}`;
       const res = await api.get(downloadUrl, { responseType: 'blob' });
       const blob = new Blob([res.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = window.URL.createObjectURL(blob);
@@ -332,9 +261,7 @@ export default function ExcelConverterView() {
     setConverting(false);
     setProgressStep(0);
     setProgressPercent(0);
-    setActiveSlideIndex(0);
-    setEditingSlideIndex(null);
-    setEditedFields({});
+    setTableFilter('');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -346,12 +273,68 @@ export default function ExcelConverterView() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const slides = conversionResult?.slides || [];
-  const filteredSlides = filterReviewOnly
-    ? slides.filter(s => s.reviewNeeded)
-    : slides;
+  // Extracted sites normalized for Excel preview table
+  const sites = useMemo(() => {
+    if (!conversionResult) return [];
+    if (Array.isArray(conversionResult.sites) && conversionResult.sites.length > 0) {
+      return conversionResult.sites;
+    }
+    // Fallback if legacy slides format is provided
+    if (Array.isArray(conversionResult.slides)) {
+      return conversionResult.slides
+        .filter(s => !s.isTermsSlide)
+        .map((s, idx) => {
+          const sizeTxt = String(s.size || '').replace(/ft|FT/g, '').trim();
+          const parts = sizeTxt.split(/[xX*×]/);
+          const w = parts[0] ? parts[0].trim() : '';
+          const h = parts[1] ? parts[1].trim() : '';
+          const sqFt = (w && h && !isNaN(w) && !isNaN(h)) ? String(Math.round(parseFloat(w) * parseFloat(h))) : '';
+          return {
+            srNo: idx + 1,
+            city: s.city || manualCity || 'Ahmedabad',
+            location: s.location || '',
+            media: s.type || 'Hoarding',
+            light: s.illum || 'BL',
+            w: w,
+            h: h,
+            sqFt: sqFt,
+            availability: s.availability || 'Available',
+            rate: s.rate || '',
+            coords: s.coords || ''
+          };
+        });
+    }
+    return [];
+  }, [conversionResult, manualCity]);
 
-  const activeSlide = slides[activeSlideIndex] || null;
+  const filteredSites = useMemo(() => {
+    if (!tableFilter.trim()) return sites;
+    const q = tableFilter.toLowerCase();
+    return sites.filter(s =>
+      String(s.location || '').toLowerCase().includes(q) ||
+      String(s.city || '').toLowerCase().includes(q) ||
+      String(s.media || '').toLowerCase().includes(q) ||
+      String(s.light || '').toLowerCase().includes(q) ||
+      String(s.rate || '').toLowerCase().includes(q) ||
+      String(s.coords || '').toLowerCase().includes(q) ||
+      String(s.srNo || '').includes(q)
+    );
+  }, [sites, tableFilter]);
+
+  // Aggregate stats
+  const totalSqFt = useMemo(() => {
+    if (conversionResult?.totalSqFt) return conversionResult.totalSqFt.toLocaleString();
+    const sum = sites.reduce((acc, s) => acc + (parseInt(String(s.sqFt).replace(/,/g, ''), 10) || 0), 0);
+    return sum.toLocaleString();
+  }, [conversionResult, sites]);
+
+  const distinctCities = useMemo(() => {
+    if (conversionResult?.cities && conversionResult.cities.length > 0) {
+      return conversionResult.cities.join(', ');
+    }
+    const set = new Set(sites.map(s => s.city).filter(Boolean));
+    return Array.from(set).join(', ') || (manualCity || 'All Markets');
+  }, [conversionResult, sites, manualCity]);
 
   return (
     <div className="scooh-ppt-converter-module">
@@ -365,8 +348,8 @@ export default function ExcelConverterView() {
             </span>
           </h1>
           <p>
-            Convert Excel workbooks (<code>.xlsx</code> / <code>.xls</code>) into official Media Buzz Master Presentation format and clean 11-column standardized Master Excel.
-            Enter city manually, customize file name, and map non-standard columns with real-time preview.
+            Convert any vendor or client Excel workbook (<code>.xlsx</code> / <code>.xls</code>) directly into clean 11-column standardized Master Excel format.
+            Includes Media Buzz brand header banner, official logo, and standard 7-point software Terms &amp; Conditions.
           </p>
         </div>
         <div className="scooh-headactions">
@@ -375,25 +358,14 @@ export default function ExcelConverterView() {
               <button
                 type="button"
                 className="scooh-btn primary"
-                onClick={handleDownloadPpt}
-                id="btn-download-excel-conv-ppt-top"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
-                </svg>
-                Download Presentation (.pptx)
-              </button>
-              <button
-                type="button"
-                className="scooh-btn secondary"
                 onClick={handleDownloadExcel}
-                id="btn-download-excel-conv-xls-top"
-                style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.35)' }}
+                id="btn-download-master-excel-top"
+                style={{ background: 'linear-gradient(135deg, #16a34a, #22c55e)', color: '#ffffff', fontWeight: 700 }}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
                 </svg>
-                Download Standardized Excel (.xlsx)
+                Download Master Excel (.xlsx)
               </button>
               <button
                 type="button"
@@ -426,7 +398,7 @@ export default function ExcelConverterView() {
                   Jade Blue 16-10-2026.xlsx (11 Columns)
                 </span>
                 <span className="scooh-pill active" style={{ fontSize: '11px' }}>
-                  Theme: {templateStatus.filename || 'MediaBuzz_Master_Template.pptx'}
+                  Standardized .xlsx Export
                 </span>
               </div>
               <p className="scooh-ppt-template-desc" style={{ marginTop: '4px', marginBottom: 0 }}>
@@ -451,7 +423,7 @@ export default function ExcelConverterView() {
         <div style={{ background: 'rgba(15, 23, 42, 0.8)', border: '1px solid rgba(34, 197, 94, 0.25)', borderRadius: '8px', padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', fontSize: '12px', color: '#cbd5e1' }}>
           <div>
             <span style={{ color: '#4ade80', fontWeight: 700, marginRight: '6px' }}>EXCEL POLICY:</span>
-            <span>External terms inside uploaded workbooks are ignored. Official 7-point software terms are attached. Missing values remain blank.</span>
+            <span>External terms inside uploaded workbooks are ignored. Official 7-point software terms are attached at bottom. Missing values remain blank.</span>
           </div>
           <span style={{ color: '#4ade80', fontWeight: 600, fontSize: '11px' }}>✓ Policy Active</span>
         </div>
@@ -498,10 +470,11 @@ export default function ExcelConverterView() {
 
           {/* Configuration Inputs: Manual City & Rename File */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px', marginBottom: '20px' }}>
-            {/* Manual City Input */}
-            <div style={{ background: '#0a1424', border: '1px solid #1e293b', borderRadius: '10px', padding: '14px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#f1f5f9', marginBottom: '6px' }}>
-                🏙️ Enter City Manually (Default / Override)
+            {/* Manual City Override */}
+            <div className="scooh-formgroup" style={{ margin: 0 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 600, color: '#e2e8f0', marginBottom: '6px' }}>
+                <span>🏙️</span>
+                <span>Enter City Manually (Default / Override)</span>
               </label>
               <input
                 type="text"
@@ -510,92 +483,92 @@ export default function ExcelConverterView() {
                 placeholder="e.g. Ahmedabad, Surat, Vadodara..."
                 style={{
                   width: '100%',
-                  boxSizing: 'border-box',
-                  background: '#111e33',
-                  border: '1px solid #2d3e58',
+                  background: '#0d1522',
+                  border: '1px solid #1e293b',
                   borderRadius: '6px',
+                  padding: '9px 12px',
                   color: '#fff',
-                  fontSize: '13px',
-                  padding: '8px 12px',
-                  outline: 'none',
-                  marginBottom: '8px'
+                  fontSize: '13px'
                 }}
               />
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', alignItems: 'center' }}>
-                <span style={{ fontSize: '11px', color: '#64748b' }}>Quick Pick:</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
+                <span style={{ fontSize: '10.5px', color: '#64748b', alignSelf: 'center' }}>Quick Pick:</span>
                 {POPULAR_CITIES.slice(0, 5).map(c => (
                   <button
                     key={c}
                     type="button"
                     onClick={() => setManualCity(c)}
                     style={{
-                      background: manualCity === c ? 'rgba(34, 197, 94, 0.25)' : 'rgba(255, 255, 255, 0.05)',
+                      background: manualCity === c ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255, 255, 255, 0.04)',
+                      border: manualCity === c ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid #1e293b',
                       color: manualCity === c ? '#4ade80' : '#94a3b8',
-                      border: manualCity === c ? '1px solid #4ade80' : '1px solid #334155',
                       borderRadius: '4px',
-                      padding: '2px 7px',
-                      fontSize: '10.5px',
+                      padding: '2px 6px',
+                      fontSize: '11px',
                       cursor: 'pointer'
                     }}
                   >
                     {c}
                   </button>
                 ))}
-                {manualCity && (
-                  <button
-                    type="button"
-                    onClick={() => setManualCity('')}
-                    style={{ background: 'transparent', border: 'none', color: '#ef4444', fontSize: '10.5px', cursor: 'pointer', padding: '0 4px' }}
-                  >
-                    Clear
-                  </button>
-                )}
               </div>
             </div>
 
-            {/* Rename File Name Input */}
-            <div style={{ background: '#0a1424', border: '1px solid #1e293b', borderRadius: '10px', padding: '14px' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 700, color: '#f1f5f9', marginBottom: '6px' }}>
-                ✏️ Output Name (Presentation & Excel)
+            {/* Rename Output File */}
+            <div className="scooh-formgroup" style={{ margin: 0 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 600, color: '#e2e8f0', marginBottom: '6px' }}>
+                <span>✏️</span>
+                <span>Output Name (Standardized Excel)</span>
               </label>
-              <div style={{ display: 'flex', alignItems: 'center', background: '#111e33', border: '1px solid #2d3e58', borderRadius: '6px', padding: '2px 10px' }}>
+              <div style={{ position: 'relative' }}>
                 <input
                   type="text"
                   value={customFileName}
                   onChange={(e) => setCustomFileName(e.target.value)}
-                  placeholder="e.g. Jade_Blue_Proposal_MediaBuzz"
+                  placeholder="Converted_MediaBuzz_Master_Format"
                   style={{
                     width: '100%',
-                    background: 'transparent',
-                    border: 'none',
+                    background: '#0d1522',
+                    border: '1px solid #1e293b',
+                    borderRadius: '6px',
+                    padding: '9px 60px 9px 12px',
                     color: '#fff',
-                    fontSize: '13px',
-                    padding: '6px 0',
-                    outline: 'none'
+                    fontSize: '13px'
                   }}
                 />
-                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: 600 }}>.pptx / .xlsx</span>
+                <span style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: '#64748b', pointerEvents: 'none' }}>
+                  .xlsx
+                </span>
               </div>
-              <p style={{ margin: '6px 0 0', fontSize: '11px', color: '#64748b' }}>
-                You can change the output file title here before converting or on the download screen.
-              </p>
+              <span className="scooh-footnote" style={{ marginTop: '4px' }}>
+                Custom output title applied to the generated Master Excel workbook.
+              </span>
             </div>
           </div>
 
-          {/* Drag & Drop Upload Zone */}
+          {/* Drag & Drop Area */}
           <div
-            className={`scooh-ppt-dropzone ${dragActive ? 'drag-over' : ''} ${file ? 'has-file' : ''}`}
+            className={`scooh-ppt-dropzone ${dragActive ? 'active' : ''} ${file ? 'has-file' : ''}`}
             onDragEnter={handleDrag}
             onDragOver={handleDrag}
             onDragLeave={handleDrag}
             onDrop={handleDrop}
-            onClick={() => !file && fileInputRef.current?.click()}
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              border: dragActive ? '2px dashed #22c55e' : '2px dashed #1e293b',
+              borderRadius: '12px',
+              padding: file ? '20px' : '40px 20px',
+              background: dragActive ? 'rgba(34, 197, 94, 0.05)' : '#071224',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              textAlign: 'center'
+            }}
           >
             <input
-              type="file"
               ref={fileInputRef}
+              type="file"
+              accept=".xlsx, .xls"
               onChange={handleFileChange}
-              accept=".xlsx,.xls"
               style={{ display: 'none' }}
             />
 
@@ -629,7 +602,7 @@ export default function ExcelConverterView() {
                   )}
                   {!inspecting && (
                     <span className="scooh-pill active" style={{ marginLeft: '12px' }}>
-                      ✓ Auto-Mapped & Ready to Convert
+                      ✓ Auto-Mapped &amp; Ready to Convert
                     </span>
                   )}
                 </div>
@@ -712,7 +685,7 @@ export default function ExcelConverterView() {
               </div>
 
               <div style={{ marginTop: '12px', padding: '8px 12px', background: 'rgba(15, 23, 42, 0.6)', borderLeft: '3px solid #ffc200', borderRadius: '4px', fontSize: '11.5px', color: '#94a3b8' }}>
-                <strong style={{ color: '#ffc200' }}>Note on Terms & Conditions:</strong> Any Terms & Conditions found in the uploaded workbook (e.g. row 18+) are automatically ignored. The official 7-point Media Buzz software terms will be attached to the final presentation.
+                <strong style={{ color: '#ffc200' }}>Note on Terms &amp; Conditions:</strong> Any Terms &amp; Conditions found in the uploaded workbook (e.g. row 18+) are automatically ignored. The official 7-point Media Buzz software terms will be attached to the final standardized Excel workbook.
               </div>
             </div>
           )}
@@ -732,13 +705,13 @@ export default function ExcelConverterView() {
               </div>
               <div className="scooh-ppt-steps">
                 <div className={`scooh-ppt-step ${progressStep >= 1 ? 'active' : ''} ${progressStep > 1 ? 'done' : ''}`}>
-                  <span>1</span> Upload Workbook
+                  <span>1</span> Upload
                 </div>
                 <div className={`scooh-ppt-step ${progressStep >= 2 ? 'active' : ''} ${progressStep > 2 ? 'done' : ''}`}>
                   <span>2</span> Parse Listings
                 </div>
                 <div className={`scooh-ppt-step ${progressStep >= 3 ? 'active' : ''} ${progressStep > 3 ? 'done' : ''}`}>
-                  <span>3</span> Apply Master Format
+                  <span>3</span> Standardize (11 Cols)
                 </div>
                 <div className={`scooh-ppt-step ${progressStep >= 4 ? 'active' : ''} ${progressStep >= 4 ? 'done' : ''}`}>
                   <span>4</span> Ready to Export
@@ -753,35 +726,30 @@ export default function ExcelConverterView() {
               type="button"
               className="scooh-btn primary large"
               onClick={handleConvert}
-              disabled={!file || !templateStatus.available || converting || inspecting}
+              disabled={!file || converting || inspecting}
               id="btn-convert-excel"
-              style={{ minWidth: '260px', padding: '12px 24px', fontSize: '14px', fontWeight: 700 }}
+              style={{ minWidth: '280px', padding: '12px 24px', fontSize: '14px', fontWeight: 700, background: 'linear-gradient(135deg, #16a34a, #22c55e)' }}
             >
               {converting ? (
                 <>
-                  <span className="scooh-spin">🔄</span> Converting Excel...
+                  <span className="scooh-spin">🔄</span> Standardizing Excel...
                 </>
               ) : (
                 <>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+                    <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
                   </svg>
-                  Convert Excel to Media Buzz PPT & Master Excel
+                  Convert to Standardized Master Excel (.xlsx)
                 </>
               )}
             </button>
-            {!templateStatus.available && (
-              <span className="scooh-footnote" style={{ color: 'var(--mb-warning)' }}>
-                ⚠ Cannot convert: Master template is unavailable.
-              </span>
-            )}
           </div>
         </div>
       ) : (
-        /* Results and Slide Previews Area */
+        /* Results Area with Excel Simulation Preview */
         <div className="scooh-ppt-results-view">
           {/* Conversion Success Overview Card */}
-          <div className="scooh-panel scooh-ppt-success-card">
+          <div className="scooh-panel scooh-ppt-success-card" style={{ borderLeft: '4px solid #22c55e' }}>
             <div className="scooh-ppt-success-left">
               <div className="scooh-ppt-success-badge" style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80' }}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
@@ -789,17 +757,16 @@ export default function ExcelConverterView() {
                 </svg>
               </div>
               <div>
-                <h3 style={{ margin: '0 0 4px', color: '#fff' }}>
-                  {conversionResult.processedSlides} Billboard Sites Converted from Excel
+                <h3 style={{ margin: '0 0 4px', color: '#fff', fontSize: '17px' }}>
+                  {sites.length} Billboard Sites Converted into Master Excel
                 </h3>
                 <p style={{ margin: 0, color: 'var(--mb-muted)', fontSize: '12px' }}>
-                  Official 16:9 widescreen layout without unnecessary terms slide.
-                  {conversionResult.manualCity && (
+                  Clean 11-column Jade Blue Master Standard with Media Buzz Header Banner &amp; Official 7-Point Terms attached.
+                  {distinctCities && (
                     <span style={{ color: '#4ade80', marginLeft: '6px' }}>
-                      City: <strong>{conversionResult.manualCity}</strong>.
+                      City: <strong>{distinctCities}</strong>.
                     </span>
                   )}
-                  Total presentation size: <strong>{conversionResult.totalSlidesInFile} slides</strong>.
                 </p>
               </div>
             </div>
@@ -812,7 +779,7 @@ export default function ExcelConverterView() {
                   value={customFileName}
                   onChange={(e) => setCustomFileName(e.target.value)}
                   placeholder="Output File Name"
-                  title="Click to rename files before downloading"
+                  title="Click to rename file before downloading"
                   style={{
                     background: 'transparent',
                     border: 'none',
@@ -824,138 +791,247 @@ export default function ExcelConverterView() {
                     padding: '6px 0'
                   }}
                 />
-                <span style={{ fontSize: '11px', color: 'var(--mb-muted)', fontWeight: 600 }}>.pptx / .xlsx</span>
+                <span style={{ fontSize: '11px', color: '#4ade80', fontWeight: 700 }}>.xlsx</span>
               </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  type="button"
-                  className="scooh-btn primary"
-                  onClick={handleDownloadPpt}
-                  id="btn-download-excel-conv-ppt-main"
-                  style={{ flex: 1 }}
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
-                  </svg>
-                  Download PPT
-                </button>
-                <button
-                  type="button"
-                  className="scooh-btn secondary"
-                  onClick={handleDownloadExcel}
-                  id="btn-download-excel-conv-xls-main"
-                  style={{ flex: 1, background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.35)' }}
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
-                  </svg>
-                  Download Excel
-                </button>
-              </div>
+              <button
+                type="button"
+                className="scooh-btn primary"
+                onClick={handleDownloadExcel}
+                id="btn-download-excel-conv-xls-main"
+                style={{ background: 'linear-gradient(135deg, #16a34a, #22c55e)', color: '#ffffff', fontWeight: 700, padding: '10px 18px', fontSize: '13px' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+                </svg>
+                Download Master Excel (.xlsx)
+              </button>
             </div>
           </div>
 
-          {/* Slide Deck Grid / Cards */}
-          <div className="scooh-panel scooh-ppt-gallery-panel">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-              <div>
-                <h3 style={{ margin: '0 0 2px', color: '#fff' }}>Slide Deck & Site Cards ({slides.length})</h3>
-                <span className="scooh-footnote">Includes Title Covers, Billboard Sites, and Closing Slide (No Terms Slide)</span>
+          {/* KPI Summary Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+            <div className="scooh-panel" style={{ padding: '12px 16px', background: '#091524', border: '1px solid #1e293b', borderRadius: '8px' }}>
+              <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Total Billboard Sites</span>
+              <div style={{ fontSize: '20px', fontWeight: 800, color: '#38bdf8', marginTop: '4px' }}>{sites.length} Sites</div>
+            </div>
+            <div className="scooh-panel" style={{ padding: '12px 16px', background: '#091524', border: '1px solid #1e293b', borderRadius: '8px' }}>
+              <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Total Display Area</span>
+              <div style={{ fontSize: '20px', fontWeight: 800, color: '#4ade80', marginTop: '4px' }}>{totalSqFt} Sq. Ft.</div>
+            </div>
+            <div className="scooh-panel" style={{ padding: '12px 16px', background: '#091524', border: '1px solid #1e293b', borderRadius: '8px' }}>
+              <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Primary Market / City</span>
+              <div style={{ fontSize: '18px', fontWeight: 800, color: '#f8fafc', marginTop: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{distinctCities}</div>
+            </div>
+            <div className="scooh-panel" style={{ padding: '12px 16px', background: '#091524', border: '1px solid #1e293b', borderRadius: '8px' }}>
+              <span style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600 }}>Master Format</span>
+              <div style={{ fontSize: '16px', fontWeight: 800, color: '#FFC200', marginTop: '4px' }}>11 Master Columns</div>
+            </div>
+          </div>
+
+          {/* Interactive Excel Sheet Preview */}
+          <div className="scooh-panel" style={{ background: '#081220', border: '1px solid #1e2f47', borderRadius: '12px', padding: '18px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', padding: '6px 8px', borderRadius: '6px' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, color: '#fff', fontSize: '15px', fontWeight: 700 }}>
+                    Master Excel Spreadsheet Preview ({sites.length} Rows)
+                  </h3>
+                  <span className="scooh-footnote" style={{ color: '#94a3b8', fontSize: '11.5px' }}>
+                    Authentic simulation of the exported 11-column Excel workbook with Media Buzz branding and terms
+                  </span>
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  type="button"
-                  className={`scooh-btn ${filterReviewOnly ? 'primary' : 'ghost'}`}
-                  onClick={() => setFilterReviewOnly(!filterReviewOnly)}
-                  style={{ fontSize: '12px', padding: '4px 10px' }}
-                >
-                  {filterReviewOnly ? 'Showing Attention Needed' : 'Filter Needs Attention'}
-                </button>
+
+              {/* Live search input */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="text"
+                  value={tableFilter}
+                  onChange={(e) => setTableFilter(e.target.value)}
+                  placeholder="Quick search in sites..."
+                  style={{
+                    background: '#0d1829',
+                    border: '1px solid #1e2f47',
+                    borderRadius: '6px',
+                    padding: '6px 12px',
+                    color: '#fff',
+                    fontSize: '12px',
+                    width: '220px'
+                  }}
+                />
+                <span className="scooh-tag" style={{ background: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.25)', fontSize: '11px' }}>
+                  Showing {filteredSites.length} of {sites.length}
+                </span>
               </div>
             </div>
 
-            <div className="scooh-ppt-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
-              {filteredSlides.map((slide, idx) => (
-                <div
-                  key={idx}
-                  className="scooh-panel"
-                  style={{
-                    background: '#0d1522',
-                    border: slide.reviewNeeded ? '1px solid rgba(245, 158, 11, 0.5)' : '1px solid #1e293b',
-                    borderRadius: '10px',
-                    padding: '12px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '10px'
-                  }}
-                >
-                  {/* Thumbnail / Visual Header */}
-                  <div style={{ position: 'relative', borderRadius: '6px', overflow: 'hidden', background: '#050b14', aspectRatio: '16 / 9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {slide.previewUrl ? (
-                      <img
-                        src={slide.previewUrl}
-                        alt={`Site ${slide.siteNumber}`}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      />
-                    ) : (
-                      <div style={{ color: '#64748b', fontSize: '12px', textAlign: 'center', padding: '10px' }}>
-                        <span>Site {slide.siteNumber}</span>
-                        <div style={{ fontSize: '11px', marginTop: '4px' }}>No photo attached in sheet</div>
-                      </div>
-                    )}
-                    <span
+            {/* Simulated Excel Sheet Container */}
+            <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #233b5c', boxShadow: '0 8px 30px rgba(0,0,0,0.5)' }}>
+              <table style={{ width: '100%', minWidth: '1100px', borderCollapse: 'collapse', fontFamily: 'Calibri, "Segoe UI", sans-serif' }}>
+                <thead>
+                  {/* Row 1: Executive Media Buzz Brand Banner */}
+                  <tr style={{ background: '#071C35', height: '52px', borderBottom: '3px solid #FFC200' }}>
+                    <th
+                      colSpan={11}
                       style={{
-                        position: 'absolute',
-                        top: '8px',
-                        left: '8px',
-                        background: '#FFC200',
-                        color: '#000',
+                        padding: '0 18px',
+                        textAlign: 'center',
+                        position: 'relative',
+                        color: '#FFC200',
+                        fontSize: '14.5px',
                         fontWeight: 800,
-                        fontSize: '11px',
-                        padding: '2px 8px',
-                        borderRadius: '4px'
+                        letterSpacing: '0.6px'
                       }}
                     >
-                      Site {slide.siteNumber}
-                    </span>
-                  </div>
-
-                  {/* Site Details */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
-                    <div style={{ fontWeight: 700, color: '#f1f5f9', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {slide.location || 'Location Not Specified'}
-                    </div>
-                    <div style={{ color: '#94a3b8', fontSize: '11px' }}>
-                      <span>City: <strong style={{ color: '#cbd5e1' }}>{slide.city || manualCity || 'Ahmedabad'}</strong></span>
-                      <span style={{ margin: '0 6px' }}>•</span>
-                      <span>Size: <strong style={{ color: '#cbd5e1' }}>{slide.size || '30x10 ft'}</strong></span>
-                      <span style={{ margin: '0 6px' }}>•</span>
-                      <span>Type: <strong style={{ color: '#cbd5e1' }}>{slide.type || 'Hoarding'}</strong></span>
-                    </div>
-                    <div style={{ color: '#94a3b8', fontSize: '11px' }}>
-                      <span>Availability: <strong style={{ color: '#4ade80' }}>{slide.availability || 'Available'}</strong></span>
-                      {slide.rate && (
-                        <>
-                          <span style={{ margin: '0 6px' }}>•</span>
-                          <span>Rate: <strong style={{ color: '#FFC200' }}>{slide.rate}</strong></span>
-                        </>
-                      )}
-                    </div>
-                    {slide.coords && (
-                      <div style={{ color: '#64748b', fontSize: '10.5px' }}>
-                        📍 {slide.coords}
+                      <span>{customFileName || 'MEDIA BUZZ — SITES SPECIFICATION'}</span>
+                      <div style={{ position: 'absolute', right: '16px', top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center' }}>
+                        <img
+                          src={MEDIA_BUZZ_LOGO_BASE64.startsWith('data:') ? MEDIA_BUZZ_LOGO_BASE64 : `data:image/png;base64,${MEDIA_BUZZ_LOGO_BASE64}`}
+                          alt="Media Buzz Logo"
+                          style={{ height: '36px', maxWidth: '140px', objectFit: 'contain' }}
+                        />
                       </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+                    </th>
+                  </tr>
+
+                  {/* Row 2: 11 Columns in Jade Blue Bright Yellow */}
+                  <tr style={{ background: '#FFFF00', color: '#000000', height: '32px', fontSize: '11.5px', fontWeight: 800 }}>
+                    <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '60px', textAlign: 'center' }}>SR NO</th>
+                    <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '110px', textAlign: 'center' }}>City</th>
+                    <th style={{ border: '1px solid #808080', padding: '6px 12px', minWidth: '280px', textAlign: 'left' }}>LOCATION</th>
+                    <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '100px', textAlign: 'center' }}>MEDIA</th>
+                    <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '70px', textAlign: 'center' }}>LIGHT</th>
+                    <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '60px', textAlign: 'center' }}>W</th>
+                    <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '60px', textAlign: 'center' }}>H</th>
+                    <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '80px', textAlign: 'center' }}>SQ FT</th>
+                    <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '110px', textAlign: 'center' }}>AVAILABLITY</th>
+                    <th style={{ border: '1px solid #808080', padding: '6px 12px', width: '130px', textAlign: 'right' }}>Selling Amount</th>
+                    <th style={{ border: '1px solid #808080', padding: '6px 10px', width: '160px', textAlign: 'left' }}>Latitude Longitude</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSites.map((site, sIdx) => {
+                    const isEven = sIdx % 2 === 0;
+                    return (
+                      <tr
+                        key={sIdx}
+                        style={{
+                          background: isEven ? '#0a1525' : '#0d1b2e',
+                          color: '#e2e8f0',
+                          fontSize: '12px',
+                          transition: 'background 0.15s ease'
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = '#132845'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = isEven ? '#0a1525' : '#0d1b2e'; }}
+                      >
+                        <td style={{ border: '1px solid #1e314d', padding: '7px 8px', textAlign: 'center', color: '#94a3b8' }}>{site.srNo}</td>
+                        <td style={{ border: '1px solid #1e314d', padding: '7px 8px', textAlign: 'center', color: '#cbd5e1' }}>{site.city}</td>
+                        <td style={{ border: '1px solid #1e314d', padding: '7px 12px', textAlign: 'left', fontWeight: 600, color: '#f8fafc' }}>{site.location}</td>
+                        <td style={{ border: '1px solid #1e314d', padding: '7px 8px', textAlign: 'center', color: '#cbd5e1' }}>{site.media}</td>
+                        <td style={{ border: '1px solid #1e314d', padding: '7px 8px', textAlign: 'center', color: '#cbd5e1' }}>{site.light}</td>
+                        <td style={{ border: '1px solid #1e314d', padding: '7px 8px', textAlign: 'center', color: '#e2e8f0' }}>{site.w}</td>
+                        <td style={{ border: '1px solid #1e314d', padding: '7px 8px', textAlign: 'center', color: '#e2e8f0' }}>{site.h}</td>
+                        <td style={{ border: '1px solid #1e314d', padding: '7px 8px', textAlign: 'center', color: '#e2e8f0' }}>{site.sqFt}</td>
+                        <td style={{ border: '1px solid #1e314d', padding: '7px 8px', textAlign: 'center' }}>
+                          <span style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700 }}>
+                            {site.availability || 'Available'}
+                          </span>
+                        </td>
+                        <td style={{ border: '1px solid #1e314d', padding: '7px 12px', textAlign: 'right', fontWeight: 700, color: '#FFC200' }}>
+                          {site.rate || '—'}
+                        </td>
+                        <td style={{ border: '1px solid #1e314d', padding: '7px 10px', textAlign: 'left', color: '#94a3b8', fontFamily: 'monospace', fontSize: '11px' }}>
+                          {site.coords || '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {/* Spacer Row before Terms */}
+                  <tr style={{ height: '18px', background: '#060d17' }}>
+                    <td colSpan={11} style={{ border: 'none' }}></td>
+                  </tr>
+
+                  {/* Terms Header Row */}
+                  <tr style={{ background: '#071C35', height: '34px', borderBottom: '2px solid #FFC200' }}>
+                    <td
+                      colSpan={11}
+                      style={{
+                        padding: '6px 12px',
+                        textAlign: 'center',
+                        color: '#FFC200',
+                        fontWeight: 800,
+                        fontSize: '12px',
+                        letterSpacing: '0.6px',
+                        border: '1px solid #234D7D'
+                      }}
+                    >
+                      TERMS &amp; CONDITIONS
+                    </td>
+                  </tr>
+
+                  {/* 7 Official Software Terms Rows */}
+                  {OFFICIAL_SOFTWARE_TERMS.map((term, tIdx) => {
+                    const isEvenTerm = tIdx % 2 === 0;
+                    return (
+                      <tr
+                        key={tIdx}
+                        style={{
+                          background: isEvenTerm ? '#fffff7' : '#ffffff',
+                          color: '#071C35',
+                          height: '28px',
+                          fontSize: '11.5px',
+                          border: '1px solid #CBD5E1'
+                        }}
+                      >
+                        <td
+                          colSpan={11}
+                          style={{
+                            padding: '6px 16px',
+                            textAlign: 'center',
+                            border: '1px solid #CBD5E1',
+                            color: '#071C35',
+                            fontWeight: 600
+                          }}
+                        >
+                          {term}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Bottom Actions Bar */}
+            <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+              <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+                Excel output conforms with <code>Jade Blue 16-10-2026.xlsx</code> standards.
+              </span>
+              <button
+                type="button"
+                className="scooh-btn primary"
+                onClick={handleDownloadExcel}
+                id="btn-download-master-excel-bottom"
+                style={{ background: 'linear-gradient(135deg, #16a34a, #22c55e)', color: '#ffffff', fontWeight: 700, padding: '10px 22px', fontSize: '13px' }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+                </svg>
+                Download Master Excel (.xlsx)
+              </button>
             </div>
           </div>
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* COLUMN MAPPING MODAL (Rule 2 & 4: Mandatory Master Excel Column Alignment) */}
+      {/* COLUMN MAPPING MODAL (Mandatory Master Excel Column Alignment) */}
       {/* ========================================================================= */}
       {showMappingModal && excelInspection && (
         <div
@@ -1093,7 +1169,7 @@ export default function ExcelConverterView() {
                 onClick={handleApplyCustomMapping}
                 style={{ minHeight: '38px', padding: '0 20px', fontSize: '12.5px', fontWeight: 800 }}
               >
-                ✓ Confirm & Apply Mapping
+                ✓ Confirm &amp; Apply Mapping
               </button>
             </div>
           </div>
@@ -1135,7 +1211,7 @@ export default function ExcelConverterView() {
               <div>
                 <h3 style={{ margin: 0, color: '#f1f5f9', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '18px', fontWeight: 800 }}>
                   <span style={{ color: '#FFC200' }}>🛡️</span>
-                  <span>Official Media Buzz Software Terms & Conditions</span>
+                  <span>Official Media Buzz Software Terms &amp; Conditions</span>
                 </h3>
                 <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#94a3b8' }}>
                   Mandatory governance: Retrieved exclusively from Media Buzz software. Any terms in master workbook or uploaded workbook are ignored.

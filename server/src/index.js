@@ -1195,14 +1195,8 @@ app.post('/api/excel-converter/convert', auth, upload.single('file'), (req, res)
     return res.status(400).json({ message: 'Only .xlsx or .xls files are supported for Excel conversion.' });
   }
 
-  const tmplInfo = getMasterTemplateInfo();
-  if (!tmplInfo.available || !tmplInfo.path) {
-    try { fs.unlinkSync(inputPath); } catch (_) {}
-    return res.status(400).json({ message: 'Master template MediaBuzz_Master_Template.pptx is missing on server.' });
-  }
-
   const baseToken = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const downloadId = `Converted_MediaBuzz_Master_Format-${baseToken}.pptx`;
+  const downloadId = `Converted_MediaBuzz_Master_Format-${baseToken}.xlsx`;
   const outputPath = path.join(convertedDir, downloadId);
   const engineScript = path.join(__dirname, 'ppt_converter_engine.py');
   const pythonBin = getPythonCommand();
@@ -1214,12 +1208,8 @@ app.post('/api/excel-converter/convert', auth, upload.single('file'), (req, res)
     engineScript,
     '--input', inputPath,
     '--output', outputPath,
-    '--template', tmplInfo.path
+    '--excel-only'
   ];
-
-  if (req.body.includeTerms !== 'true') {
-    args.push('--no-terms');
-  }
 
   if (manualCity) {
     args.push('--manual-city', manualCity);
@@ -1262,11 +1252,11 @@ app.post('/api/excel-converter/convert', auth, upload.single('file'), (req, res)
     }
 
     if (err || (result && !result.success)) {
-      let errMsg = (result && result.error) || (stderr && stderr.trim()) || (err && err.message) || 'Conversion processing failed.';
+      let errMsg = (result && result.error) || (stderr && stderr.trim()) || (err && err.message) || 'Excel conversion processing failed.';
       if (err && err.code === 'ENOENT') {
         errMsg = `Python runtime (${pythonBin}) was not found on this server. Please install python3.`;
-      } else if (errMsg.includes('No module named') && errMsg.includes('pptx')) {
-        errMsg = 'Missing required python-pptx library on server. Please run: pip install python-pptx Pillow openpyxl xlrd';
+      } else if (errMsg.includes('No module named') && errMsg.includes('openpyxl')) {
+        errMsg = 'Missing required openpyxl library on server. Please run: pip install openpyxl';
       }
       console.error('[Excel Converter Error]', errMsg, stderr);
       return res.status(500).json({ message: errMsg });
@@ -1277,19 +1267,16 @@ app.post('/api/excel-converter/convert', auth, upload.single('file'), (req, res)
     }
 
     result.downloadId = downloadId;
-    result.downloadName = `${customTitle || 'Converted_MediaBuzz_Master_Format'}.pptx`;
-    result.excelDownloadId = downloadId.replace(/\.pptx$/i, '.xlsx');
+    result.excelDownloadId = downloadId;
+    result.downloadName = `${customTitle || 'Converted_MediaBuzz_Master_Format'}.xlsx`;
     result.excelDownloadName = `${customTitle || 'Converted_MediaBuzz_Master_Format'}.xlsx`;
     result.customName = customTitle;
     res.json(result);
   });
 });
 
-// PPT Download handler
-app.get([
-  '/api/ppt-converter/download/:downloadId',
-  '/api/excel-converter/download/:downloadId'
-], auth, (req, res) => {
+// PPT Download handler (PPT Converter only)
+app.get('/api/ppt-converter/download/:downloadId', auth, (req, res) => {
   const downloadId = path.basename(req.params.downloadId || '');
   if (!downloadId || !downloadId.endsWith('.pptx')) {
     return res.status(400).send('Invalid download identifier.');
@@ -1310,9 +1297,10 @@ app.get([
   res.sendFile(filePath);
 });
 
-// Excel Download handler (serves standardized .xlsx generated during conversion)
+// Excel Download handler (serves standardized .xlsx for both PPT and Excel converters)
 app.get([
   '/api/ppt-converter/download-excel/:downloadId',
+  '/api/excel-converter/download/:downloadId',
   '/api/excel-converter/download-excel/:downloadId'
 ], auth, (req, res) => {
   let downloadId = path.basename(req.params.downloadId || '');
