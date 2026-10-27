@@ -1176,7 +1176,7 @@ function safeDownloadBlob(blob, filename, mimeType = 'application/octet-stream')
   }, 60000);
 }
 
-async function makePpt(sites, pages = {}, fileName = `${getTodayPptDateStr()}.pptx`) {
+async function makePpt(sites, pages = {}, fileName = `${getTodayPptDateStr()}.pptx`, specsConfig = {}) {
 
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -1314,7 +1314,7 @@ async function makePpt(sites, pages = {}, fileName = `${getTodayPptDateStr()}.pp
     return '30 x 32';
   }
 
-  async function siteSlide(site, photoUrl, siteIndex = 1) {
+  async function siteSlide(site, photoUrl, siteIndex = 1, currentSpecs = {}) {
     const s = pptx.addSlide();
     // Solid pitch black background matching final reference format
     s.background = { color: '000000' };
@@ -1375,93 +1375,98 @@ async function makePpt(sites, pages = {}, fileName = `${getTodayPptDateStr()}.pp
       fontFace: 'Arial', fontSize: 16, bold: true, color: 'FFFFFF', valign: 'middle', margin: 0
     });
 
-    // 7. Specifications Rows (6 rows total)
-    // Row 1: Size
-    const row1Y = 3.12;
-    if (iconSizePng) s.addImage({ data: iconSizePng, x: 7.45, y: row1Y, w: 0.42, h: 0.42 });
-    s.addText([
-      { text: 'Size:  ', options: { color: 'FFC200', bold: true, fontSize: 14.5, fontFace: 'Arial' } },
-      { text: getSize(site), options: { color: 'FFFFFF', bold: true, fontSize: 14.5, fontFace: 'Arial' } }
-    ], { x: 8.12, y: row1Y - 0.02, w: 4.80, h: 0.44, valign: 'middle', margin: 0 });
-    s.addShape(pptx.ShapeType.line, { x: 8.12, y: row1Y + 0.46, w: 4.80, h: 0, line: { color: '333333', width: 0.8 } });
-
-    // Row 2: Type
-    const row2Y = 3.74;
-    if (iconTypePng) s.addImage({ data: iconTypePng, x: 7.45, y: row2Y, w: 0.42, h: 0.42 });
-    s.addText([
-      { text: 'Type:  ', options: { color: 'FFC200', bold: true, fontSize: 14.5, fontFace: 'Arial' } },
-      { text: String(site.media_type || 'Hoarding'), options: { color: 'FFFFFF', bold: true, fontSize: 14.5, fontFace: 'Arial' } }
-    ], { x: 8.12, y: row2Y - 0.02, w: 4.80, h: 0.44, valign: 'middle', margin: 0 });
-    s.addShape(pptx.ShapeType.line, { x: 8.12, y: row2Y + 0.46, w: 4.80, h: 0, line: { color: '333333', width: 0.8 } });
-
-    // Row 3: Illumination
-    const row3Y = 4.36;
-    if (iconIllumPng) s.addImage({ data: iconIllumPng, x: 7.45, y: row3Y, w: 0.42, h: 0.42 });
-    s.addText([
-      { text: 'Illumination:  ', options: { color: 'FFC200', bold: true, fontSize: 14.5, fontFace: 'Arial' } },
-      { text: String(site.lighting || 'Lit').toUpperCase(), options: { color: 'FFFFFF', bold: true, fontSize: 14.5, fontFace: 'Arial' } }
-    ], { x: 8.12, y: row3Y - 0.02, w: 4.80, h: 0.44, valign: 'middle', margin: 0 });
-    s.addShape(pptx.ShapeType.line, { x: 8.12, y: row3Y + 0.46, w: 4.80, h: 0, line: { color: '333333', width: 0.8 } });
-
-    // Row 4: Adv.fee per month
-    const row4Y = 4.98;
-    let rateText = 'On Request';
-    if (site._showRate && site._rate) {
-      rateText = `₹ ${Number(site._rate).toLocaleString('en-IN')}/-`;
-    } else if (site.ppt_rate || site.monthly_rate) {
-      const r = site.ppt_rate || site.monthly_rate;
-      rateText = isNaN(Number(r)) ? String(r) : `₹ ${Number(r).toLocaleString('en-IN')}/-`;
+    // 7. Specifications Rows (Dynamically stacked based on whole PPT user selection)
+    const activeSpecs = [];
+    if (currentSpecs.size !== false) {
+      activeSpecs.push({
+        icon: iconSizePng,
+        label: 'Size:  ',
+        value: getSize(site)
+      });
     }
-    if (iconRupeePng) s.addImage({ data: iconRupeePng, x: 7.45, y: row4Y, w: 0.42, h: 0.42 });
-    s.addText([
-      { text: 'Adv.fee per month:  ', options: { color: 'FFC200', bold: true, fontSize: 14.5, fontFace: 'Arial' } },
-      { text: rateText, options: { color: 'FFFFFF', bold: true, fontSize: 14.5, fontFace: 'Arial' } }
-    ], { x: 8.12, y: row4Y - 0.02, w: 4.80, h: 0.44, valign: 'middle', margin: 0 });
-    s.addShape(pptx.ShapeType.line, { x: 8.12, y: row4Y + 0.46, w: 4.80, h: 0, line: { color: '333333', width: 0.8 } });
+    if (currentSpecs.type !== false) {
+      activeSpecs.push({
+        icon: iconTypePng,
+        label: 'Type:  ',
+        value: String(site.media_type || 'Hoarding')
+      });
+    }
+    if (currentSpecs.illum !== false) {
+      activeSpecs.push({
+        icon: iconIllumPng,
+        label: 'Illumination:  ',
+        value: String(site.lighting || 'Lit').toUpperCase()
+      });
+    }
+    if (currentSpecs.rate !== false) {
+      let rateText = 'On Request';
+      if (site._showRate && site._rate) {
+        rateText = `₹ ${Number(site._rate).toLocaleString('en-IN')}/-`;
+      } else if (site.ppt_rate || site.monthly_rate) {
+        const r = site.ppt_rate || site.monthly_rate;
+        rateText = isNaN(Number(r)) ? String(r) : `₹ ${Number(r).toLocaleString('en-IN')}/-`;
+      }
+      activeSpecs.push({
+        icon: iconRupeePng,
+        label: 'Adv.fee per month:  ',
+        value: rateText
+      });
+    }
+    if (currentSpecs.avail !== false) {
+      let availText = 'Available';
+      const rawVal = String(site._availability || site.ppt_availability || site.availability || '').trim();
+      const dateObj = extractDateFromString(rawVal) || (site._endDate ? (parseDay(site._endDate) || new Date(site._endDate)) : null);
+      const dateFmt = dateObj ? fmtDate(dateObj) : (site._endDate || '');
 
-    // Row 5: Availability
-    // Requirement:
-    // - Booked sites must come as: 'Booked till <date>' (not 'Available from <date>')
-    // - Available sites must come as: 'Available' only
-    const row5Y = 5.60;
-    let availText = 'Available';
-    const rawVal = String(site._availability || site.ppt_availability || site.availability || '').trim();
-    const dateObj = extractDateFromString(rawVal) || (site._endDate ? (parseDay(site._endDate) || new Date(site._endDate)) : null);
-    const dateFmt = dateObj ? fmtDate(dateObj) : (site._endDate || '');
+      const isBooked = site._isBooked !== undefined
+        ? Boolean(site._isBooked)
+        : (Boolean(site._endDate) || /^(?:booked|occupied)/i.test(rawVal) || (/available\s+from/i.test(rawVal) && Boolean(dateFmt)));
 
-    const isBooked = site._isBooked !== undefined
-      ? Boolean(site._isBooked)
-      : (Boolean(site._endDate) || /^(?:booked|occupied)/i.test(rawVal) || (/available\s+from/i.test(rawVal) && Boolean(dateFmt)));
+      if (isBooked) {
+        availText = dateFmt ? `Booked till ${dateFmt}` : (site._availability || 'Occupied');
+      } else {
+        availText = 'Available';
+      }
 
-    if (isBooked) {
-      availText = dateFmt ? `Booked till ${dateFmt}` : (site._availability || 'Occupied');
-    } else {
-      availText = 'Available';
+      if (/^available\s+from\s+/i.test(availText)) {
+        availText = availText.replace(/^available\s+from\s+/i, 'Booked till ');
+      }
+      if (/^(?:occupied|booked)$/i.test(availText) && dateFmt) {
+        availText = `Booked till ${dateFmt}`;
+      }
+      activeSpecs.push({
+        icon: iconAvailPng,
+        label: 'Availability:  ',
+        value: availText
+      });
+    }
+    if (currentSpecs.coords !== false) {
+      const { lat, lng } = getCoords(site);
+      const coordsText = (lat && lng) ? `${lat}, ${lng}` : '23.012345, 72.567890';
+      activeSpecs.push({
+        icon: iconPinPng,
+        label: 'Location Coordinates:  ',
+        value: coordsText
+      });
     }
 
-    // Safety checks: Guarantee "Available from" is converted to "Booked till", and clean formatting
-    if (/^available\s+from\s+/i.test(availText)) {
-      availText = availText.replace(/^available\s+from\s+/i, 'Booked till ');
-    }
-    if (/^(?:occupied|booked)$/i.test(availText) && dateFmt) {
-      availText = `Booked till ${dateFmt}`;
-    }
-    if (iconAvailPng) s.addImage({ data: iconAvailPng, x: 7.45, y: row5Y, w: 0.42, h: 0.42 });
-    s.addText([
-      { text: 'Availability:  ', options: { color: 'FFC200', bold: true, fontSize: 14.5, fontFace: 'Arial' } },
-      { text: availText, options: { color: 'FFFFFF', bold: true, fontSize: 14.5, fontFace: 'Arial' } }
-    ], { x: 8.12, y: row5Y - 0.02, w: 4.80, h: 0.44, valign: 'middle', margin: 0 });
-    s.addShape(pptx.ShapeType.line, { x: 8.12, y: row5Y + 0.46, w: 4.80, h: 0, line: { color: '333333', width: 0.8 } });
+    const startY = 3.12;
+    const rowStep = 0.62;
+    activeSpecs.forEach((spec, idx) => {
+      const currY = startY + idx * rowStep;
+      if (spec.icon) {
+        s.addImage({ data: spec.icon, x: 7.45, y: currY, w: 0.42, h: 0.42 });
+      }
+      s.addText([
+        { text: spec.label, options: { color: 'FFC200', bold: true, fontSize: 14.5, fontFace: 'Arial' } },
+        { text: spec.value, options: { color: 'FFFFFF', bold: true, fontSize: 14.5, fontFace: 'Arial' } }
+      ], { x: 8.12, y: currY - 0.02, w: 4.80, h: 0.44, valign: 'middle', margin: 0 });
 
-    // Row 6: Location Coordinates
-    const row6Y = 6.22;
-    const { lat, lng } = getCoords(site);
-    const coordsText = (lat && lng) ? `${lat}, ${lng}` : '23.012345, 72.567890';
-    if (iconPinPng) s.addImage({ data: iconPinPng, x: 7.45, y: row6Y, w: 0.42, h: 0.42 });
-    s.addText([
-      { text: 'Location Coordinates:  ', options: { color: 'FFC200', bold: true, fontSize: 14.5, fontFace: 'Arial' } },
-      { text: coordsText, options: { color: 'FFFFFF', bold: true, fontSize: 14.5, fontFace: 'Arial' } }
-    ], { x: 8.12, y: row6Y - 0.02, w: 4.80, h: 0.44, valign: 'middle', margin: 0 });
+      // Add separator line after each row except the last one
+      if (idx < activeSpecs.length - 1) {
+        s.addShape(pptx.ShapeType.line, { x: 8.12, y: currY + 0.46, w: 4.80, h: 0, line: { color: '333333', width: 0.8 } });
+      }
+    });
   }
 
   // Helper to get effective page url with localStorage fallback
@@ -1490,11 +1495,11 @@ async function makePpt(sites, pages = {}, fileName = `${getTodayPptDateStr()}.pp
   for (const st of sites) {
     if (st.ppt_images && st.ppt_images.length) {
       for (const u of st.ppt_images) {
-        await siteSlide(st, u, siteCounter);
+        await siteSlide(st, u, siteCounter, specsConfig);
         siteCounter++;
       }
     } else {
-      await siteSlide(st, '', siteCounter);
+      await siteSlide(st, '', siteCounter, specsConfig);
       siteCounter++;
     }
   }
@@ -3120,6 +3125,28 @@ function PptView() {
   const [campaignMap, setCampaignMap] = useState({});
   const [campaignsBySiteCode, setCampaignsBySiteCode] = useState({}); // ALL campaigns per site for date overlap
 
+  // Whole PPT slide specifications toggle state
+  const DEFAULT_PPT_SPECS = { size: true, type: true, illum: true, rate: true, avail: true, coords: true };
+  const [specsConfig, setSpecsConfig] = useState(() => {
+    try {
+      const saved = localStorage.getItem('mb_ppt_specs_config');
+      if (saved) return { ...DEFAULT_PPT_SPECS, ...JSON.parse(saved) };
+    } catch {}
+    return DEFAULT_PPT_SPECS;
+  });
+
+  const updateSpecsConfig = (updater) => {
+    setSpecsConfig(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      try { localStorage.setItem('mb_ppt_specs_config', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  const allSpecsChecked = Object.values(specsConfig).every(Boolean);
+  const noneSpecsChecked = Object.values(specsConfig).every(v => !v);
+  const selectedSpecsCount = Object.values(specsConfig).filter(Boolean).length;
+
   function getCleanPptName() {
     let clean = (pptName || '').trim();
     if (!clean) clean = getTodayPptDateStr();
@@ -4195,7 +4222,7 @@ function PptView() {
 
     setGenerating(true);
     try {
-      await makePpt(chosen, pages, `${cleanName}.pptx`);
+      await makePpt(chosen, pages, `${cleanName}.pptx`, specsConfig);
 
       if (alsoGenerateExcel) {
         // Safe delay to ensure iOS Safari and mobile browsers finish initiating the PPT download
@@ -4491,6 +4518,175 @@ function PptView() {
           <div>
             <h3>1. Select sites and slide values</h3>
             <p>Use the approved Media Buzz format: site details on the left and the site image on the right. Availability and monthly rate are optional and can be imported from Excel or edited manually.</p>
+          </div>
+        </div>
+
+        {/* Whole PPT Slide Specifications Controls Panel */}
+        <div className="scooh-ppt-specs-panel" style={{
+          background: 'linear-gradient(135deg, rgba(13, 27, 42, 0.95) 0%, rgba(10, 20, 32, 0.95) 100%)',
+          border: '1px solid rgba(255, 194, 0, 0.28)',
+          borderRadius: '12px',
+          padding: '14px 16px',
+          margin: '14px 0 16px',
+          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.28)'
+        }}>
+          {/* Header row with Title, Hint, and Select All Master Checkbox */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            flexWrap: 'wrap',
+            paddingBottom: '10px',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            marginBottom: '12px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                background: 'rgba(255, 194, 0, 0.15)',
+                border: '1px solid rgba(255, 194, 0, 0.4)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#FFC200',
+                fontSize: '16px'
+              }}>
+                📑
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '13.5px', fontWeight: 800, color: '#FFFFFF', letterSpacing: '0.3px' }}>
+                    Slide Specifications (Whole PPT)
+                  </span>
+                  <span style={{
+                    fontSize: '11px',
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: '10px',
+                    background: selectedSpecsCount > 0 ? 'rgba(34, 197, 94, 0.18)' : 'rgba(239, 68, 68, 0.18)',
+                    color: selectedSpecsCount > 0 ? '#4ade80' : '#f87171',
+                    border: `1px solid ${selectedSpecsCount > 0 ? 'rgba(34, 197, 94, 0.35)' : 'rgba(239, 68, 68, 0.35)'}`
+                  }}>
+                    {selectedSpecsCount} of 6 included
+                  </span>
+                </div>
+                <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '2px' }}>
+                  Choose which specification details appear on slides across the whole PPT. Uncheck any item to omit it completely without gaps.
+                </div>
+              </div>
+            </div>
+
+            {/* Master Select All / Deselect All Checkbox */}
+            <label style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '6px 14px',
+              borderRadius: '8px',
+              background: allSpecsChecked ? 'rgba(255, 194, 0, 0.16)' : 'rgba(255, 255, 255, 0.05)',
+              border: `1px solid ${allSpecsChecked ? '#FFC200' : 'rgba(255, 255, 255, 0.14)'}`,
+              cursor: 'pointer',
+              userSelect: 'none',
+              transition: 'all 0.18s ease'
+            }}>
+              <input
+                type="checkbox"
+                checked={allSpecsChecked}
+                ref={el => { if (el) el.indeterminate = !allSpecsChecked && !noneSpecsChecked; }}
+                onChange={() => {
+                  const targetState = !allSpecsChecked;
+                  updateSpecsConfig({
+                    size: targetState,
+                    type: targetState,
+                    illum: targetState,
+                    rate: targetState,
+                    avail: targetState,
+                    coords: targetState
+                  });
+                }}
+                style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#FFC200' }}
+              />
+              <span style={{
+                fontSize: '12px',
+                fontWeight: 800,
+                color: allSpecsChecked ? '#FFC200' : '#FFFFFF'
+              }}>
+                Select All ({allSpecsChecked ? 'All Included' : `${selectedSpecsCount}/6`})
+              </span>
+            </label>
+          </div>
+
+          {/* Grid of the 6 individual specification options matching user reference image */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
+            gap: '10px'
+          }}>
+            {[
+              { key: 'size', label: 'Size', hint: 'e.g. 40x20 ft', icon: '⤢' },
+              { key: 'type', label: 'Type', hint: 'e.g. Hoarding', icon: '💬' },
+              { key: 'illum', label: 'Illumination', hint: 'e.g. Front Lit', icon: '💡' },
+              { key: 'rate', label: 'Adv.fee per month', hint: 'e.g. On Request / ₹', icon: '💵' },
+              { key: 'avail', label: 'Availability', hint: 'e.g. Available / Booked', icon: '🗓️' },
+              { key: 'coords', label: 'Location Coordinates', hint: 'e.g. 23.012345, 72.567890', icon: '📍' }
+            ].map(item => {
+              const checked = specsConfig[item.key] !== false;
+              return (
+                <label
+                  key={item.key}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    background: checked ? 'rgba(255, 194, 0, 0.08)' : 'rgba(15, 23, 42, 0.6)',
+                    border: `1px solid ${checked ? 'rgba(255, 194, 0, 0.45)' : 'rgba(255, 255, 255, 0.08)'}`,
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={e => {
+                      updateSpecsConfig(prev => ({ ...prev, [item.key]: e.target.checked }));
+                    }}
+                    style={{ width: '15px', height: '15px', cursor: 'pointer', accentColor: '#FFC200' }}
+                  />
+                  <span style={{ fontSize: '15px', lineHeight: 1 }}>{item.icon}</span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      color: checked ? '#FFC200' : '#94a3b8',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}>
+                      {item.label}
+                    </div>
+                    <div style={{ fontSize: '10.5px', color: '#64748b' }}>
+                      {item.hint}
+                    </div>
+                  </div>
+                  <span style={{
+                    fontSize: '10px',
+                    fontWeight: 800,
+                    color: checked ? '#4ade80' : '#64748b',
+                    padding: '1px 5px',
+                    borderRadius: '4px',
+                    background: checked ? 'rgba(74, 222, 128, 0.12)' : 'rgba(100, 116, 139, 0.12)'
+                  }}>
+                    {checked ? 'KEEP' : 'HIDE'}
+                  </span>
+                </label>
+              );
+            })}
           </div>
         </div>
 
