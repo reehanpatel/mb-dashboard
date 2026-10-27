@@ -16,8 +16,17 @@ import base64
 import argparse
 import zipfile
 import datetime
+import urllib.parse
 import xml.etree.ElementTree as ET
 import xml.sax.saxutils as saxutils
+
+# Official Media Buzz Brand Logo Base64 (from client/src/excelLogo.js)
+MEDIA_BUZZ_LOGO_BASE64 = (
+    'iVBORw0KGgoAAAANSUhEUgAAAZAAAACUCAIAAAAyO+g5AABM5ElEQVR4nO1dBXjcxta9M9LyrmnNDEkchzlN2zTllFJImftK7/VPmfEVUki'
+    'ZKdSmr5RSUqakEGbmGGNmexmkmf8byXZsL5jWjp3qfKq/Zlc7Gkmjozt3zr0X0U2gQIECBQMC+Eh3QIECBQo6C4WwFChQMGCgEJYCBQoG'
+    'DBTCUqBAwYCBQlgKFCgYMFAIS4ECBQMGCmEpUKBgwEAhLAUKFAwYKISlQIGCAQOFsBQoUDBgoBCWAgUKBgwUwlKgQMGAgUJYChQogIGC/'
+    'wfjM6u44JGTwQAAAABJRU5ErkJggg=='
+)
 
 # Ensure utf-8 encoding for stdout and stderr with replace error handling
 if hasattr(sys.stdout, 'reconfigure'):
@@ -213,7 +222,9 @@ COL_TIER1 = [
         'address', 'site name', 'particulars', 'site particulars', 'site description', 'description',
         'site details', 'details', 'venue', 'street', 'display location', 'board location', 'hoarding location',
         'hoarding address', 'road / location', 'location / landmark', 'landmark / area', 'area / landmark',
-        'site placement', 'site specification', 'site particulars / location', 'placement'
+        'site placement', 'site specification', 'site particulars / location', 'placement',
+        'site', 'spot', 'name of site', 'site title', 'billboard location', 'hoarding name', 'display name',
+        'location name', 'site / location'
     ]),
     ('w', [
         'w', 'width', 'wdt', 'wdt.', 'w (ft)', 'w(ft)', 'w ft', 'w.ft', 'w.ft.', 'width (ft)', 'width in feet',
@@ -237,20 +248,21 @@ COL_TIER1 = [
         'availability / vacant date', 'vacant date', 'down date', 'available from', 'booked till',
         'vacant from', 'free from', 'ready from', 'up date', 'expiry', 'valid till', 'end date',
         'booking date', 'date of availability', 'availability date', 'status', 'vacant', 'vacancy',
-        'available date', 'free date', 'booking status', 'occupancy'
+        'available date', 'free date', 'booking status', 'occupancy', 'immediate'
     ]),
     ('rate', [
         'rate for 1 month', 'rate for 1month', 'selling amount', 'selling rate', 'monthly rate',
         'adv fee per month', 'adv fee', 'adv. fee', 'advt. fees per month', 'total amount', 'rental',
         'cost', 'rate', 'price', 'amount', 'rent', 'tariff', 'card rate', 'offer rate', 'display charge',
-        'fee', 'per month', 'pm', 'charges', 'adv cost', 'adv. fee / month', 'monthly rental'
+        'fee', 'per month', 'pm', 'charges', 'adv cost', 'adv. fee / month', 'monthly rental',
+        'rent/month', 'rate/month', 'display charges'
     ]),
     ('coords', [
         'latitude- longitude (google map location)', 'latitude- longitude', 'latitude - longitude',
         'latitude longitude', 'latitude, longitude', 'latitude / longitude', 'lat long', 'lat-long',
         'lat - long', 'lat, lng', 'lat/long', 'google map location', 'google map link', 'google map',
         'map location', 'map link', 'location map', 'coordinates', 'geo coordinates', 'location coordinates',
-        'coords', 'gps', 'gmap', 'map', 'link'
+        'coords', 'gps', 'gmap', 'map', 'link', 'latitude & longitude', 'lat & long'
     ]),
     ('media', [
         'media type', 'media_type', 'mediatype', 'billboard type', 'type of hoarding', 'display type',
@@ -264,7 +276,7 @@ COL_TIER1 = [
 ]
 
 COL_TIER2 = [
-    ('location', ['landmark', 'site', 'road', 'area', 'placement', 'hoarding', 'board', 'name']),
+    ('location', ['landmark', 'site', 'road', 'area', 'placement', 'hoarding', 'board', 'name', 'particulars', 'spot']),
     ('media', ['media', 'type', 'format']),
     ('avail', ['date', 'status', 'vacant', 'day'])
 ]
@@ -272,13 +284,16 @@ COL_TIER2 = [
 def detect_best_sheet_and_headers(wb, requested_sheet=None, column_mapping=None):
     """
     Scans workbook sheets and header rows using multi-keyword scoring to find the true data sheet and header row.
-    Supports explicit sheet requests, filtering empty sheets, and applying custom column mapping safely.
+    Supports explicit sheet requests (with case/whitespace tolerance), filtering empty sheets, and applying custom column mapping safely.
     Includes Pass 5 Content-Based Auto-Detection to automatically recognize all columns from any Excel workbook.
     """
     candidate_sheets = []
-    if requested_sheet and requested_sheet in wb.sheetnames:
-        candidate_sheets = [wb[requested_sheet]]
-    else:
+    if requested_sheet:
+        req_clean = str(requested_sheet).strip().lower()
+        matched = next((sname for sname in wb.sheetnames if sname.strip().lower() == req_clean), None)
+        if matched:
+            candidate_sheets = [wb[matched]]
+    if not candidate_sheets:
         for sname in wb.sheetnames:
             try:
                 s = wb[sname]
@@ -297,8 +312,8 @@ def detect_best_sheet_and_headers(wb, requested_sheet=None, column_mapping=None)
     best_score = -1
 
     for ws in candidate_sheets:
-        max_r = min(30, ws.max_row) if ws.max_row else 1
-        max_c = ws.max_column if ws.max_column else 1
+        max_r = min(30, getattr(ws, 'max_row', 1) or 1)
+        max_c = getattr(ws, 'max_column', 1) or 1
         for r in range(1, max_r + 1):
             row_vals = [str(ws.cell(r, c).value or '').strip() for c in range(1, max_c + 1)]
             score = sum(1 for val in row_vals if any(kw in val.lower().replace('_', ' ') for kw in HEADER_KEYWORDS if val))
@@ -309,7 +324,7 @@ def detect_best_sheet_and_headers(wb, requested_sheet=None, column_mapping=None)
                 score += 3
             if any('size' in val.lower() or 'sqft' in val.lower() for val in row_vals if val):
                 score += 2
-            if any('rate' in val.lower() or 'amount' in val.lower() or 'price' in val.lower() for val in row_vals if val):
+            if any('rate' in val.lower() or 'amount' in val.lower() or 'price' in val.lower() or 'rent' in val.lower() for val in row_vals if val):
                 score += 3
             if any('lat' in val.lower() or 'coord' in val.lower() or 'map' in val.lower() for val in row_vals if val):
                 score += 3
@@ -321,9 +336,18 @@ def detect_best_sheet_and_headers(wb, requested_sheet=None, column_mapping=None)
                 best_headers = row_vals
 
     if best_score < 2:
-        best_ws = wb[requested_sheet] if requested_sheet and requested_sheet in wb.sheetnames else (wb['Sites'] if 'Sites' in wb.sheetnames else wb.active)
+        best_ws = candidate_sheets[0] if candidate_sheets else wb.active
+        # Look for the row with the most text columns in first 15 rows
         best_row_idx = 1
-        best_headers = [str(best_ws.cell(1, c).value or '').strip() for c in range(1, best_ws.max_column + 1)]
+        best_cnt = 0
+        max_scan_r = min(15, getattr(best_ws, 'max_row', 1) or 1)
+        for r_s in range(1, max_scan_r + 1):
+            vals_s = [str(best_ws.cell(r_s, c).value or '').strip() for c in range(1, (getattr(best_ws, 'max_column', 1) or 1) + 1)]
+            non_empty_cnt = sum(1 for v in vals_s if v and not re.match(r'^-?\d+(\.\d+)?$', v))
+            if non_empty_cnt > best_cnt:
+                best_cnt = non_empty_cnt
+                best_row_idx = r_s
+                best_headers = vals_s
 
     while best_headers and not best_headers[-1]:
         best_headers.pop()
@@ -1098,10 +1122,10 @@ def load_pure_xml_xlsx(excel_path):
         if 'xl/sharedStrings.xml' in z.namelist():
             ss_xml = z.read('xl/sharedStrings.xml')
             root = ET.fromstring(ss_xml)
-            for si in root.findall('{*}si'):
-                text_parts = []
-                for t in si.iter('{*}t'):
-                    if t.text: text_parts.append(t.text)
+            for si in root:
+                if not (si.tag.endswith('}si') or si.tag == 'si'):
+                    continue
+                text_parts = [t.text for t in si.iter() if (t.tag.endswith('}t') or t.tag == 't') and t.text]
                 shared_strings.append(''.join(text_parts))
 
         # 2. Parse sheet names from workbook.xml
@@ -1109,10 +1133,11 @@ def load_pure_xml_xlsx(excel_path):
         if 'xl/workbook.xml' in z.namelist():
             wb_xml = z.read('xl/workbook.xml')
             root = ET.fromstring(wb_xml)
-            for s in root.iter('{*}sheet'):
-                s_name = s.attrib.get('name')
-                s_id = s.attrib.get('sheetId', '1')
-                sheet_map[f"xl/worksheets/sheet{s_id}.xml"] = s_name
+            for s in root.iter():
+                if s.tag.endswith('}sheet') or s.tag == 'sheet':
+                    s_name = s.attrib.get('name')
+                    s_id = s.attrib.get('sheetId', '1')
+                    sheet_map[f"xl/worksheets/sheet{s_id}.xml"] = s_name
 
         sheets_dict = {}
         for fname in z.namelist():
@@ -1121,25 +1146,32 @@ def load_pure_xml_xlsx(excel_path):
                 s_xml = z.read(fname)
                 root = ET.fromstring(s_xml)
                 rows_data = {}
-                for row_el in root.iter('{*}row'):
+                for row_el in root.iter():
+                    if not (row_el.tag.endswith('}row') or row_el.tag == 'row'):
+                        continue
                     r_idx_str = row_el.attrib.get('r')
                     r_num = int(r_idx_str) if r_idx_str else 1
-                    for c_el in row_el.iter('{*}c'):
+                    for c_el in row_el:
+                        if not (c_el.tag.endswith('}c') or c_el.tag == 'c'):
+                            continue
                         cell_ref = c_el.attrib.get('r', '')
                         m = re.match(r'([A-Za-z]+)(\d+)', cell_ref)
                         if m:
-                            c_num = parse_col_letter(m.group(1))
+                            col_chars = m.group(1).upper()
+                            c_num = 0
+                            for char in col_chars:
+                                c_num = c_num * 26 + (ord(char) - ord('A') + 1)
                             r_num = int(m.group(2))
                         else:
                             c_num = 1
                         t_type = c_el.attrib.get('t')
-                        v_el = c_el.find('{*}v')
+                        v_el = next((e for e in c_el if e.tag.endswith('}v') or e.tag == 'v'), None)
                         raw_v = v_el.text if v_el is not None and v_el.text is not None else ""
                         if t_type == 's' and raw_v.isdigit():
                             idx = int(raw_v)
                             val = shared_strings[idx] if idx < len(shared_strings) else raw_v
                         elif t_type == 'inlineStr':
-                            t_el = c_el.find('.//{*}t')
+                            t_el = next((e for e in c_el.iter() if e.tag.endswith('}t') or e.tag == 't'), None)
                             val = t_el.text if t_el is not None else ""
                         else:
                             val = raw_v
@@ -1212,7 +1244,10 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
             continue
         # Rule 7: Ignore Terms & Conditions in Excel workbook completely
         if 'TERMS' in row_text_all.upper() and 'CONDITION' in row_text_all.upper():
-            break
+            if len(entries) > 0:
+                break
+            else:
+                continue
 
         def get_val(field):
             col = mapping.get(field)
@@ -1241,8 +1276,20 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
         lat_val = get_val('lat')
         lng_val = get_val('lng')
 
+        # Fallback location from any text cell in row if loc is missing BEFORE skipping
+        if not loc:
+            best_t = ""
+            for c_i in range(1, ws.max_column + 1):
+                cv = str(ws.cell(r, c_i).value or '').strip()
+                if not cv: continue
+                if len(cv) > len(best_t) and not re.match(r'^-?\d+(?:\.\d+)?$', cv) and cv.lower() not in ('bl', 'fl', 'nl', 'available', 'vacant', 'booked', 'immediate'):
+                    if not re.match(r'^\d{1,2}[./\-]\d{1,2}[./\-]\d{2,4}$', cv):
+                        best_t = cv
+            if best_t:
+                loc = best_t
+
         # Skip completely empty rows
-        if not loc and not city and not sr_no and not code_val and not coords_raw:
+        if not loc and not city and not sr_no and not code_val and not coords_raw and not size_raw and not (w and h):
             continue
 
         # Clean code
@@ -1311,17 +1358,6 @@ def extract_entries_from_excel(excel_path, column_mapping=None, sheet_name=None)
                     break
 
         rate_str = format_inr(rate_val) if rate_val else ""
-
-        # Fallback location from any text cell in row if loc is missing
-        if not loc:
-            best_t = ""
-            for c_i in range(1, ws.max_column + 1):
-                cv = str(ws.cell(r, c_i).value or '').strip()
-                if not cv: continue
-                if len(cv) > len(best_t) and not re.match(r'^-?\d+(?:\.\d+)?$', cv) and cv.lower() not in ('bl', 'fl', 'nl', 'available', 'vacant', 'booked'):
-                    best_t = cv
-            if best_t:
-                loc = best_t
 
         # Clean location without altering actual listing information (remove site codes and dates)
         cleaned_loc = clean_location(loc, size_str=size_str, code_str=code_val or code_str, city_str=city) if loc else ""
@@ -1399,7 +1435,10 @@ def inspect_excel(excel_path, sheet_name=None, column_mapping=None):
             continue
         if 'TERMS' in row_text_all.upper() and 'CONDITION' in row_text_all.upper():
             terms_detected = True
-            break
+            if total_sites > 0:
+                break
+            else:
+                continue
 
         def get_val(field):
             col = mapping.get(field)
@@ -1426,7 +1465,19 @@ def inspect_excel(excel_path, sheet_name=None, column_mapping=None):
         rate_val = get_val('rate')
         coords = format_gps_coords(get_val('coords'), get_val('lat'), get_val('lng'))
 
-        if not loc and not city and not sr_no and not code_val and not coords:
+        # Fallback location from any text cell in row if loc is missing BEFORE skipping
+        if not loc:
+            best_t = ""
+            for c_i in range(1, ws.max_column + 1):
+                cv = str(ws.cell(r, c_i).value or '').strip()
+                if not cv: continue
+                if len(cv) > len(best_t) and not re.match(r'^-?\d+(?:\.\d+)?$', cv) and cv.lower() not in ('bl', 'fl', 'nl', 'available', 'vacant', 'booked', 'immediate'):
+                    if not re.match(r'^\d{1,2}[./\-]\d{1,2}[./\-]\d{2,4}$', cv):
+                        best_t = cv
+            if best_t:
+                loc = best_t
+
+        if not loc and not city and not sr_no and not code_val and not coords and not size_raw and not (w and h):
             continue
 
         size_str = ""
@@ -1574,11 +1625,12 @@ def merge_companion_excel(ppt_entries, companion_excel_path, column_mapping=None
 
     return ppt_entries
 
-def generate_master_excel(entries, output_excel_path, manual_city=None, title="MEDIA BUZZ - SITES SPECIFICATION"):
+def generate_master_excel(entries, output_excel_path, manual_city=None, title="MEDIA BUZZ — SITES & MEDIA PORTFOLIO"):
     """
     Generates an authentic 11-column Master Excel workbook matching Jade Blue 16-10-2026.xlsx format.
     Columns: SR NO, City, LOCATION, MEDIA, LIGHT, W, H, SQ FT, AVAILABLITY, Selling Amount, Latitude Longitude
-    Includes the official 7-point Media Buzz software Terms & Conditions.
+    Includes the official Media Buzz brand logo badge at top-right of Row 1
+    and the executive 7-point Terms & Conditions block at the bottom.
     """
     if not HAS_OPENPYXL or not openpyxl:
         return
@@ -1591,14 +1643,41 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
         ws = wb.active
         ws.title = "Sites"
 
+        total_cols = 11
+
         # Row 1: Executive Media Buzz Brand Header
         ws.merge_cells('A1:K1')
+        ws.row_dimensions[1].height = 46.0
+
+        navy_fill = PatternFill(start_color='FF071C35', end_color='FF071C35', fill_type='solid')
+        header_border = Border(
+            left=Side(style='thin', color='FF234D7D'),
+            right=Side(style='thin', color='FF234D7D'),
+            top=Side(style='thin', color='FF234D7D'),
+            bottom=Side(style='medium', color='FFFFC200')
+        )
+
+        for col_idx in range(1, total_cols + 1):
+            cell = ws.cell(row=1, column=col_idx)
+            cell.fill = navy_fill
+            cell.border = header_border
+
         title_cell = ws['A1']
-        title_cell.value = (title or "MEDIA BUZZ - SITES SPECIFICATION").upper()
-        title_cell.font = Font(name='Calibri', size=13, bold=True, color='1E293B')
+        title_cell.value = (title or "MEDIA BUZZ — SITES & MEDIA PORTFOLIO").strip()
+        title_cell.font = Font(name='Calibri', size=13, bold=True, color='FFFFC200')
         title_cell.alignment = Alignment(horizontal='center', vertical='center')
-        title_cell.fill = PatternFill(start_color='F1F5F9', end_color='F1F5F9', fill_type='solid')
-        ws.row_dimensions[1].height = 32
+
+        # Add official Media Buzz brand logo on the top right
+        try:
+            from openpyxl.drawing.image import Image
+            img_data = base64.b64decode(MEDIA_BUZZ_LOGO_BASE64)
+            logo_img = Image(io.BytesIO(img_data))
+            logo_img.width = 400
+            logo_img.height = 148
+            # Anchor at Column K (Latitude Longitude), Row 1
+            ws.add_image(logo_img, 'K1')
+        except Exception as img_err:
+            sys.stderr.write(f"[Excel Logo Embed Notice] {img_err}\n")
 
         # Row 2: Headers matching Jade Blue 16-10-2026.xlsx in Bright Yellow
         headers = [
@@ -1606,7 +1685,7 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
             'W', 'H', 'SQ FT', 'AVAILABLITY', 'Selling Amount', 'Latitude Longitude'
         ]
         ws.append(headers)
-        ws.row_dimensions[2].height = 26
+        ws.row_dimensions[2].height = 26.0
 
         yellow_fill = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')
         header_font = Font(name='Calibri', size=11, bold=True, color='000000')
@@ -1617,7 +1696,7 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
             bottom=Side(style='medium', color='808080')
         )
 
-        for col_idx in range(1, 12):
+        for col_idx in range(1, total_cols + 1):
             cell = ws.cell(row=2, column=col_idx)
             cell.fill = yellow_fill
             cell.font = header_font
@@ -1657,13 +1736,13 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
                 w_val,
                 h_val,
                 sqft_val,
-                'Available',
+                e.get('availability') or 'Available',
                 e.get('rate') or '',
                 e.get('coords') or ''
             ]
             ws.append(row_data)
-            ws.row_dimensions[r_num].height = 22
-            for col_idx in range(1, 12):
+            ws.row_dimensions[r_num].height = 22.0
+            for col_idx in range(1, total_cols + 1):
                 cell = ws.cell(row=r_num, column=col_idx)
                 cell.font = data_font
                 cell.border = data_border
@@ -1676,10 +1755,58 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
             ws.column_dimensions[get_column_letter(col_idx)].width = width
 
         # Official 7-point Media Buzz software Terms & Conditions at bottom
-        terms_start = len(entries) + 5
-        ws.cell(row=terms_start, column=2, value="TERMS & CONDITIONS:").font = Font(name='Calibri', size=11, bold=True, color='1E293B')
-        for t_idx, term in enumerate(OFFICIAL_SOFTWARE_TERMS):
-            ws.cell(row=terms_start + 1 + t_idx, column=2, value=term).font = Font(name='Calibri', size=10, color='475569')
+        terms_start = len(entries) + 4
+        ws.merge_cells(start_row=terms_start, start_column=1, end_row=terms_start, end_column=total_cols)
+        ws.row_dimensions[terms_start].height = 24.0
+        for col_idx in range(1, total_cols + 1):
+            cell = ws.cell(row=terms_start, column=col_idx)
+            cell.fill = navy_fill
+            cell.border = Border(
+                top=Side(style='thin', color='FF234D7D'),
+                bottom=Side(style='medium', color='FFFFC200'),
+                left=Side(style='thin', color='FF234D7D'),
+                right=Side(style='thin', color='FF234D7D')
+            )
+        h_cell = ws.cell(row=terms_start, column=1)
+        h_cell.value = "TERMS & CONDITIONS"
+        h_cell.font = Font(name='Calibri', size=11, bold=True, color='FFFFC200')
+        h_cell.alignment = Alignment(horizontal='center', vertical='center')
+
+        # 7 Term rows with alternating cream/white and official wording
+        term_border_thin = Border(
+            top=Side(style='thin', color='FFE2E8F0'),
+            bottom=Side(style='thin', color='FFE2E8F0'),
+            left=Side(style='thin', color='FFCBD5E1'),
+            right=Side(style='thin', color='FFCBD5E1')
+        )
+        term_border_last = Border(
+            top=Side(style='thin', color='FFE2E8F0'),
+            bottom=Side(style='medium', color='FF071C35'),
+            left=Side(style='thin', color='FFCBD5E1'),
+            right=Side(style='thin', color='FFCBD5E1')
+        )
+
+        for t_idx, term_text in enumerate(OFFICIAL_SOFTWARE_TERMS):
+            curr_r = terms_start + 1 + t_idx
+            ws.merge_cells(start_row=curr_r, start_column=1, end_row=curr_r, end_column=total_cols)
+            ws.row_dimensions[curr_r].height = 21.0
+            row_fill = PatternFill(
+                start_color='FFFFFDF5' if t_idx % 2 == 0 else 'FFFFFFFF',
+                end_color='FFFFFDF5' if t_idx % 2 == 0 else 'FFFFFFFF',
+                fill_type='solid'
+            )
+            is_last = (t_idx == len(OFFICIAL_SOFTWARE_TERMS) - 1)
+            r_border = term_border_last if is_last else term_border_thin
+
+            for col_idx in range(1, total_cols + 1):
+                cell = ws.cell(row=curr_r, column=col_idx)
+                cell.fill = row_fill
+                cell.border = r_border
+
+            t_cell = ws.cell(row=curr_r, column=1)
+            t_cell.value = term_text
+            t_cell.font = Font(name='Calibri', size=11, bold=False, color='FF071C35')
+            t_cell.alignment = Alignment(horizontal='center', vertical='center')
 
         os.makedirs(os.path.dirname(os.path.abspath(output_excel_path)), exist_ok=True)
         wb.save(output_excel_path)
