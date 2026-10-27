@@ -59,6 +59,11 @@ export default function ExcelConverterView() {
   // Table preview search filter
   const [tableFilter, setTableFilter] = useState('');
 
+  // Pre-conversion Excel Sheet Preview state
+  const [prePreviewTab, setPrePreviewTab] = useState('mapped'); // 'mapped' | 'raw'
+  const [preFilter, setPreFilter] = useState('');
+  const [showPrePreview, setShowPrePreview] = useState(true);
+
   // Handle Drag & Drop
   const handleDrag = useCallback((e) => {
     e.preventDefault();
@@ -335,6 +340,56 @@ export default function ExcelConverterView() {
     const set = new Set(sites.map(s => s.city).filter(Boolean));
     return Array.from(set).join(', ') || (manualCity || 'All Markets');
   }, [conversionResult, sites, manualCity]);
+
+  // Pre-conversion detected sites normalized for preview
+  const preDetectedSites = useMemo(() => {
+    if (!excelInspection) return [];
+    if (Array.isArray(excelInspection.detectedRows) && excelInspection.detectedRows.length > 0) {
+      return excelInspection.detectedRows.map(r => ({
+        ...r,
+        city: manualCity || r.city || 'Ahmedabad'
+      }));
+    }
+    if (Array.isArray(excelInspection.sampleRows)) {
+      return excelInspection.sampleRows.map((r, idx) => ({
+        srNo: idx + 1,
+        city: manualCity || r.city || 'Ahmedabad',
+        location: r.location || '',
+        media: r.media || 'Hoarding',
+        light: r.light || 'BL',
+        w: r.w || '',
+        h: r.h || '',
+        sqFt: r.sqFt || '',
+        availability: r.avail || 'Available',
+        rate: r.rate || '',
+        coords: r.coords || ''
+      }));
+    }
+    return [];
+  }, [excelInspection, manualCity]);
+
+  const filteredPreSites = useMemo(() => {
+    if (!preFilter.trim()) return preDetectedSites;
+    const q = preFilter.toLowerCase();
+    return preDetectedSites.filter(s =>
+      String(s.location || '').toLowerCase().includes(q) ||
+      String(s.city || '').toLowerCase().includes(q) ||
+      String(s.media || '').toLowerCase().includes(q) ||
+      String(s.light || '').toLowerCase().includes(q) ||
+      String(s.rate || '').toLowerCase().includes(q) ||
+      String(s.coords || '').toLowerCase().includes(q) ||
+      String(s.srNo || '').includes(q)
+    );
+  }, [preDetectedSites, preFilter]);
+
+  const filteredRawRows = useMemo(() => {
+    if (!excelInspection || !Array.isArray(excelInspection.rawRows)) return [];
+    if (!preFilter.trim()) return excelInspection.rawRows;
+    const q = preFilter.toLowerCase();
+    return excelInspection.rawRows.filter(r =>
+      r.cells && r.cells.some(c => String(c || '').toLowerCase().includes(q))
+    );
+  }, [excelInspection, preFilter]);
 
   return (
     <div className="scooh-ppt-converter-module">
@@ -686,6 +741,200 @@ export default function ExcelConverterView() {
 
               <div style={{ marginTop: '12px', padding: '8px 12px', background: 'rgba(15, 23, 42, 0.6)', borderLeft: '3px solid #ffc200', borderRadius: '4px', fontSize: '11.5px', color: '#94a3b8' }}>
                 <strong style={{ color: '#ffc200' }}>Note on Terms &amp; Conditions:</strong> Any Terms &amp; Conditions found in the uploaded workbook (e.g. row 18+) are automatically ignored. The official 7-point Media Buzz software terms will be attached to the final standardized Excel workbook.
+              </div>
+
+              {/* Pre-Conversion Live Excel Sheet Preview */}
+              <div style={{ marginTop: '16px', borderTop: '1px solid #1e293b', paddingTop: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', padding: '4px 6px', borderRadius: '4px', display: 'flex', alignItems: 'center' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+                      </svg>
+                    </div>
+                    <strong style={{ color: '#fff', fontSize: '13px' }}>
+                      Detected Sheet Preview ({preDetectedSites.length} Sites)
+                    </strong>
+                    <button
+                      type="button"
+                      onClick={() => setShowPrePreview(prev => !prev)}
+                      style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: '11px', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+                    >
+                      {showPrePreview ? 'Collapse Preview' : 'Expand Preview'}
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {/* View Switcher: Mapped Master vs Raw Uploaded */}
+                    <div style={{ display: 'inline-flex', background: '#0a1628', border: '1px solid #1e293b', borderRadius: '6px', padding: '2px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setPrePreviewTab('mapped')}
+                        style={{
+                          background: prePreviewTab === 'mapped' ? 'rgba(34, 197, 94, 0.2)' : 'transparent',
+                          color: prePreviewTab === 'mapped' ? '#4ade80' : '#94a3b8',
+                          border: 'none',
+                          borderRadius: '4px',
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Standard Master (11 Cols)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPrePreviewTab('raw')}
+                        style={{
+                          background: prePreviewTab === 'raw' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                          color: prePreviewTab === 'raw' ? '#38bdf8' : '#94a3b8',
+                          border: 'none',
+                          borderRadius: '4px',
+                          padding: '4px 8px',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Original Sheet ({excelInspection.headers?.length || 0} Cols)
+                      </button>
+                    </div>
+
+                    {/* Search */}
+                    <input
+                      type="text"
+                      value={preFilter}
+                      onChange={(e) => setPreFilter(e.target.value)}
+                      placeholder="Search preview..."
+                      style={{
+                        background: '#0d1829',
+                        border: '1px solid #1e2f47',
+                        borderRadius: '6px',
+                        padding: '4px 10px',
+                        color: '#fff',
+                        fontSize: '11.5px',
+                        width: '160px'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {showPrePreview && (
+                  <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #233b5c', maxHeight: '380px', overflowY: 'auto' }}>
+                    {prePreviewTab === 'mapped' ? (
+                      <table style={{ width: '100%', minWidth: '1000px', borderCollapse: 'collapse', fontFamily: 'Calibri, "Segoe UI", sans-serif' }}>
+                        <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                          <tr style={{ background: '#FFFF00', color: '#000000', height: '30px', fontSize: '11.5px', fontWeight: 800 }}>
+                            <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '55px', textAlign: 'center' }}>SR NO</th>
+                            <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '100px', textAlign: 'center' }}>City</th>
+                            <th style={{ border: '1px solid #808080', padding: '6px 10px', minWidth: '260px', textAlign: 'left' }}>LOCATION</th>
+                            <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '90px', textAlign: 'center' }}>MEDIA</th>
+                            <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '65px', textAlign: 'center' }}>LIGHT</th>
+                            <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '55px', textAlign: 'center' }}>W</th>
+                            <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '55px', textAlign: 'center' }}>H</th>
+                            <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '75px', textAlign: 'center' }}>SQ FT</th>
+                            <th style={{ border: '1px solid #808080', padding: '6px 8px', width: '100px', textAlign: 'center' }}>AVAILABLITY</th>
+                            <th style={{ border: '1px solid #808080', padding: '6px 10px', width: '120px', textAlign: 'right' }}>Selling Amount</th>
+                            <th style={{ border: '1px solid #808080', padding: '6px 10px', width: '150px', textAlign: 'left' }}>Latitude Longitude</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredPreSites.length === 0 ? (
+                            <tr>
+                              <td colSpan={11} style={{ textAlign: 'center', padding: '24px', color: '#94a3b8' }}>
+                                No sites matching "{preFilter}"
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredPreSites.map((site, sIdx) => {
+                              const isEven = sIdx % 2 === 0;
+                              return (
+                                <tr
+                                  key={sIdx}
+                                  style={{
+                                    background: isEven ? '#0a1525' : '#0d1b2e',
+                                    color: '#e2e8f0',
+                                    fontSize: '11.5px',
+                                    transition: 'background 0.15s ease'
+                                  }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.background = '#132845'; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.background = isEven ? '#0a1525' : '#0d1b2e'; }}
+                                >
+                                  <td style={{ border: '1px solid #1e314d', padding: '6px 8px', textAlign: 'center', color: '#94a3b8' }}>{site.srNo}</td>
+                                  <td style={{ border: '1px solid #1e314d', padding: '6px 8px', textAlign: 'center', color: '#cbd5e1' }}>{site.city}</td>
+                                  <td style={{ border: '1px solid #1e314d', padding: '6px 10px', textAlign: 'left', fontWeight: 600, color: '#f8fafc' }}>{site.location}</td>
+                                  <td style={{ border: '1px solid #1e314d', padding: '6px 8px', textAlign: 'center', color: '#cbd5e1' }}>{site.media}</td>
+                                  <td style={{ border: '1px solid #1e314d', padding: '6px 8px', textAlign: 'center', color: '#cbd5e1' }}>{site.light}</td>
+                                  <td style={{ border: '1px solid #1e314d', padding: '6px 8px', textAlign: 'center', color: '#e2e8f0' }}>{site.w}</td>
+                                  <td style={{ border: '1px solid #1e314d', padding: '6px 8px', textAlign: 'center', color: '#e2e8f0' }}>{site.h}</td>
+                                  <td style={{ border: '1px solid #1e314d', padding: '6px 8px', textAlign: 'center', color: '#e2e8f0' }}>{site.sqFt}</td>
+                                  <td style={{ border: '1px solid #1e314d', padding: '6px 8px', textAlign: 'center' }}>
+                                    <span style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 700 }}>
+                                      {site.availability || 'Available'}
+                                    </span>
+                                  </td>
+                                  <td style={{ border: '1px solid #1e314d', padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: '#FFC200' }}>
+                                    {site.rate || '—'}
+                                  </td>
+                                  <td style={{ border: '1px solid #1e314d', padding: '6px 10px', textAlign: 'left', color: '#94a3b8', fontFamily: 'monospace', fontSize: '10.5px' }}>
+                                    {site.coords || '—'}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    ) : (
+                      /* Raw Sheet Preview */
+                      <table style={{ width: '100%', minWidth: '900px', borderCollapse: 'collapse', fontFamily: 'Calibri, "Segoe UI", sans-serif' }}>
+                        <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
+                          <tr style={{ background: '#1e293b', color: '#38bdf8', height: '30px', fontSize: '11px', fontWeight: 700 }}>
+                            <th style={{ border: '1px solid #334155', padding: '6px 8px', width: '50px', textAlign: 'center' }}>#</th>
+                            {excelInspection.headers.map((h, hIdx) => (
+                              <th key={hIdx} style={{ border: '1px solid #334155', padding: '6px 10px', textAlign: 'left', whiteSpace: 'nowrap' }}>
+                                Col {hIdx + 1}: {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredRawRows.length === 0 ? (
+                            <tr>
+                              <td colSpan={(excelInspection.headers?.length || 1) + 1} style={{ textAlign: 'center', padding: '24px', color: '#94a3b8' }}>
+                                No rows matching search filter
+                              </td>
+                            </tr>
+                          ) : (
+                            filteredRawRows.map((r, rIdx) => {
+                              const isEven = rIdx % 2 === 0;
+                              return (
+                                <tr
+                                  key={rIdx}
+                                  style={{
+                                    background: isEven ? '#0a1525' : '#0d1b2e',
+                                    color: '#cbd5e1',
+                                    fontSize: '11.5px'
+                                  }}
+                                >
+                                  <td style={{ border: '1px solid #1e314d', padding: '6px 8px', textAlign: 'center', color: '#64748b' }}>
+                                    {r.row}
+                                  </td>
+                                  {r.cells.map((cellVal, cIdx) => (
+                                    <td key={cIdx} style={{ border: '1px solid #1e314d', padding: '6px 10px', textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '240px' }}>
+                                      {cellVal || '—'}
+                                    </td>
+                                  ))}
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}

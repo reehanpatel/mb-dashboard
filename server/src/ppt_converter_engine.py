@@ -1426,6 +1426,8 @@ def inspect_excel(excel_path, sheet_name=None, column_mapping=None):
     matches_master = (headers_norm == master_norm)
 
     sample_rows = []
+    detected_rows = []
+    raw_rows = []
     total_sites = 0
     terms_detected = False
 
@@ -1433,6 +1435,13 @@ def inspect_excel(excel_path, sheet_name=None, column_mapping=None):
         row_text_all = ' '.join([str(ws.cell(r, c).value or '') for c in range(1, ws.max_column + 1)]).strip()
         if not row_text_all:
             continue
+
+        # Collect raw row values for preview
+        if len(raw_rows) < 50:
+            raw_cells = [str(ws.cell(r, c).value or '').strip() for c in range(1, len(headers_found) + 1)]
+            if any(raw_cells):
+                raw_rows.append({'row': r, 'cells': raw_cells})
+
         if 'TERMS' in row_text_all.upper() and 'CONDITION' in row_text_all.upper():
             terms_detected = True
             if total_sites > 0:
@@ -1481,6 +1490,7 @@ def inspect_excel(excel_path, sheet_name=None, column_mapping=None):
             continue
 
         size_str = ""
+        dim_m = None
         if w and h:
             try:
                 w_disp = int(float(w)) if float(w).is_integer() else w
@@ -1490,10 +1500,13 @@ def inspect_excel(excel_path, sheet_name=None, column_mapping=None):
                 size_str = f"{w}x{h} ft"
         elif size_raw:
             size_str = size_raw
+            dim_m = re.match(r'(\d+(?:\.\d+)?)\s*[xX*×]\s*(\d+(?:\.\d+)?)', str(size_raw).replace('ft', '').replace('FT', '').strip())
         elif sq_ft:
             size_str = f"{sq_ft} sq.ft"
         elif loc:
             size_str = extract_size(loc) or ""
+            if size_str:
+                dim_m = re.match(r'(\d+(?:\.\d+)?)\s*[xX*×]\s*(\d+(?:\.\d+)?)', str(size_str).replace('ft', '').replace('FT', '').strip())
 
         if media and media.upper() in ('FL', 'BL', 'NL', 'LED', 'FRONTLIT', 'BACKLIT'):
             if not light:
@@ -1504,6 +1517,34 @@ def inspect_excel(excel_path, sheet_name=None, column_mapping=None):
         cleaned_loc = clean_location(loc, size_str=size_str, code_str=code_val, city_str=city) if loc else ""
 
         total_sites += 1
+
+        w_col = str(dim_m.group(1)) if dim_m else str(w or "")
+        h_col = str(dim_m.group(2)) if dim_m else str(h or "")
+        calc_sqft = ""
+        if w_col and h_col:
+            try:
+                calc_sqft = str(int(float(w_col) * float(h_col)))
+            except Exception:
+                calc_sqft = str(sq_ft or "")
+        else:
+            calc_sqft = str(sq_ft or "")
+
+        row_item = {
+            'row': r,
+            'srNo': total_sites,
+            'city': city or '',
+            'location': cleaned_loc or loc,
+            'media': media or 'Hoarding',
+            'light': light or 'BL',
+            'w': w_col,
+            'h': h_col,
+            'sqFt': calc_sqft,
+            'availability': avail or 'Available',
+            'rate': rate_str,
+            'coords': coords
+        }
+        detected_rows.append(row_item)
+
         if len(sample_rows) < 5:
             sample_rows.append({
                 'row': r,
@@ -1528,6 +1569,8 @@ def inspect_excel(excel_path, sheet_name=None, column_mapping=None):
         'masterColumns': MASTER_TEMPLATE_COLUMNS,
         'mapping': mapping,
         'sampleRows': sample_rows,
+        'detectedRows': detected_rows,
+        'rawRows': raw_rows,
         'totalSites': total_sites,
         'termsDetected': terms_detected,
         'termsNotice': "Terms & Conditions present in workbook will be ignored. Official 7-point Media Buzz software Terms & Conditions will be used exclusively."
@@ -1625,16 +1668,142 @@ def merge_companion_excel(ppt_entries, companion_excel_path, column_mapping=None
 
     return ppt_entries
 
-def generate_master_excel(entries, output_excel_path, manual_city=None, title="MEDIA BUZZ — SITES & MEDIA PORTFOLIO"):
-    """
-    Generates an authentic 11-column Master Excel workbook matching Jade Blue 16-10-2026.xlsx format.
-    Columns: SR NO, City, LOCATION, MEDIA, LIGHT, W, H, SQ FT, AVAILABLITY, Selling Amount, Latitude Longitude
-    Includes the official Media Buzz brand logo badge at top-right of Row 1
-    and the executive 7-point Terms & Conditions block at the bottom.
-    """
-    if not HAS_OPENPYXL or not openpyxl:
-        return
+CANDIDATE_EXCEL_TEMPLATE_PATHS = [
+    os.path.join(os.path.dirname(__file__), '..', 'templates', 'master_excel_template.xlsx'),
+    os.path.join(os.path.dirname(__file__), 'templates', 'master_excel_template.xlsx'),
+    os.path.join(os.getcwd(), 'server', 'templates', 'master_excel_template.xlsx'),
+    os.path.join(os.getcwd(), 'templates', 'master_excel_template.xlsx'),
+    os.path.join(r'C:\Users\reeha\Downloads', 'Jade Blue 16-10-2026.xlsx'),
+    os.path.join(os.path.dirname(__file__), '..', 'templates', 'Jade Blue 16-10-2026.xlsx'),
+    os.path.join(os.getcwd(), 'Jade Blue 16-10-2026.xlsx')
+]
 
+def find_master_excel_template(explicit_path=None):
+    if explicit_path and os.path.isfile(explicit_path):
+        return os.path.abspath(explicit_path)
+    for p in CANDIDATE_EXCEL_TEMPLATE_PATHS:
+        if os.path.isfile(p):
+            return os.path.abspath(p)
+    return None
+
+def generate_master_excel_pure(entries, output_excel_path, template_excel_path=None, manual_city=None, title="MEDIA BUZZ - SITES SPECIFICATION"):
+    """
+    Generates an authentic 11-column Master Excel workbook using pure Python standard library (zipfile + XML).
+    Does NOT require openpyxl, Pillow or any external dependency, guaranteeing 100% reliable execution on Hostinger and Linux.
+    Preserves authentic fonts, colors (Navy #071C35, Gold #FFC200, Yellow #FFFF00), embedded Media Buzz logo (image1.png at K1),
+    and 7-point official Media Buzz software terms.
+    """
+    tmpl_path = template_excel_path or find_master_excel_template()
+    if not tmpl_path or not os.path.isfile(tmpl_path):
+        raise FileNotFoundError("Master Excel template not found at candidate paths.")
+
+    with zipfile.ZipFile(tmpl_path, 'r') as z_in:
+        files = {name: z_in.read(name) for name in z_in.namelist()}
+
+    sheet_xml = files['xl/worksheets/sheet1.xml'].decode('utf-8')
+
+    # Row 1: Executive Media Buzz Brand Header
+    title_escaped = saxutils.escape((title or "MEDIA BUZZ - SITES SPECIFICATION").strip())
+    row1_xml = (
+        f'<row r="1" spans="1:11" ht="46" customHeight="1" thickBot="1">'
+        f'<c r="A1" s="7" t="inlineStr"><is><t>{title_escaped}</t></is></c>'
+        f'<c r="B1" s="7"/><c r="C1" s="7"/><c r="D1" s="7"/><c r="E1" s="7"/>'
+        f'<c r="F1" s="7"/><c r="G1" s="7"/><c r="H1" s="7"/><c r="I1" s="7"/><c r="J1" s="7"/><c r="K1" s="7"/>'
+        f'</row>'
+    )
+
+    # Row 2: Headers matching Jade Blue 16-10-2026.xlsx in Bright Yellow
+    headers = ['SR NO', 'City', 'LOCATION', 'MEDIA', 'LIGHT', 'W', 'H', 'SQ FT', 'AVAILABLITY', 'Selling Amount', 'Latitude Longitude']
+    header_cols = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K']
+    r2_cells = []
+    for c_letter, h_text in zip(header_cols, headers):
+        s_idx = "2" if c_letter in ['B', 'C'] else "1"
+        r2_cells.append(f'<c r="{c_letter}2" s="{s_idx}" t="inlineStr"><is><t>{saxutils.escape(h_text)}</t></is></c>')
+    row2_xml = f'<row r="2" spans="1:11" ht="26" customHeight="1" thickBot="1">{"".join(r2_cells)}</row>'
+
+    # Row 3+: Data Rows
+    data_rows_xml = []
+    for idx, e in enumerate(entries, start=1):
+        r_num = idx + 2
+        size_txt = str(e.get('size') or '').replace('ft', '').replace('FT', '').strip()
+        dim_m = re.match(r'(\d+(?:\.\d+)?)\s*[xX*×]\s*(\d+(?:\.\d+)?)', size_txt)
+        w_val = e.get('w') or (dim_m.group(1) if dim_m else "")
+        h_val = e.get('h') or (dim_m.group(2) if dim_m else "")
+        sqft_val = e.get('sq_ft') or ""
+        if not sqft_val and dim_m:
+            try:
+                sqft_val = str(int(float(dim_m.group(1)) * float(dim_m.group(2))))
+            except Exception:
+                sqft_val = ""
+
+        city_val = manual_city or e.get('city') or 'Ahmedabad'
+        loc_val = e.get('location') or ''
+        media_val = e.get('type') or 'Hoarding'
+        light_val = e.get('illum') or 'BL'
+        avail_val = e.get('availability') or 'Available'
+        rate_val = e.get('rate') or ''
+        coords_val = e.get('coords') or ''
+
+        cells = [
+            f'<c r="A{r_num}" s="4"><v>{idx}</v></c>',
+            f'<c r="B{r_num}" s="5" t="inlineStr"><is><t>{saxutils.escape(str(city_val))}</t></is></c>',
+            f'<c r="C{r_num}" s="5" t="inlineStr"><is><t>{saxutils.escape(str(loc_val))}</t></is></c>',
+            f'<c r="D{r_num}" s="4" t="inlineStr"><is><t>{saxutils.escape(str(media_val))}</t></is></c>',
+            f'<c r="E{r_num}" s="4" t="inlineStr"><is><t>{saxutils.escape(str(light_val))}</t></is></c>',
+            f'<c r="F{r_num}" s="4" t="inlineStr"><is><t>{saxutils.escape(str(w_val))}</t></is></c>',
+            f'<c r="G{r_num}" s="4" t="inlineStr"><is><t>{saxutils.escape(str(h_val))}</t></is></c>',
+            f'<c r="H{r_num}" s="4" t="inlineStr"><is><t>{saxutils.escape(str(sqft_val))}</t></is></c>',
+            f'<c r="I{r_num}" s="4" t="inlineStr"><is><t>{saxutils.escape(str(avail_val))}</t></is></c>',
+            f'<c r="J{r_num}" s="6" t="inlineStr"><is><t>{saxutils.escape(str(rate_val))}</t></is></c>',
+            f'<c r="K{r_num}" s="5" t="inlineStr"><is><t>{saxutils.escape(str(coords_val))}</t></is></c>'
+        ]
+        data_rows_xml.append(f'<row r="{r_num}" spans="1:11" ht="22" customHeight="1">{"".join(cells)}</row>')
+
+    # Terms & Conditions at bottom
+    terms_start = len(entries) + 4
+    th_cells = [f'<c r="{c}{terms_start}" s="8"' + (' t="inlineStr"><is><t>TERMS &amp; CONDITIONS</t></is></c>' if c == 'A' else '/>') for c in header_cols]
+    terms_header_xml = f'<row r="{terms_start}" spans="1:11" ht="24" customHeight="1" thickBot="1">{"".join(th_cells)}</row>'
+
+    terms_rows_xml = []
+    merge_ranges = ['A1:K1', f'A{terms_start}:K{terms_start}']
+    for t_idx, t_text in enumerate(OFFICIAL_SOFTWARE_TERMS):
+        curr_r = terms_start + 1 + t_idx
+        s_idx = "9" if t_idx % 2 == 0 else "10"
+        t_escaped = saxutils.escape(t_text)
+        cells = [f'<c r="{c}{curr_r}" s="{s_idx}"' + (f' t="inlineStr"><is><t>{t_escaped}</t></is></c>' if c == 'A' else '/>') for c in header_cols]
+        terms_rows_xml.append(f'<row r="{curr_r}" spans="1:11" ht="21" customHeight="1">{"".join(cells)}</row>')
+        merge_ranges.append(f'A{curr_r}:K{curr_r}')
+
+    all_rows = [row1_xml, row2_xml] + data_rows_xml + [terms_header_xml] + terms_rows_xml
+    new_sheet_data = f'<sheetData>{"".join(all_rows)}</sheetData>'
+
+    sheet_xml = re.sub(r'<sheetData>.*?</sheetData>', new_sheet_data, sheet_xml, flags=re.DOTALL)
+
+    merge_xml = f'<mergeCells count="{len(merge_ranges)}">' + ''.join([f'<mergeCell ref="{m}"/>' for m in merge_ranges]) + '</mergeCells>'
+    if '<mergeCells' in sheet_xml:
+        sheet_xml = re.sub(r'<mergeCells.*?</mergeCells>', merge_xml, sheet_xml, flags=re.DOTALL)
+    else:
+        if '<drawing' in sheet_xml:
+            sheet_xml = sheet_xml.replace('<drawing', merge_xml + '<drawing')
+        else:
+            sheet_xml = sheet_xml.replace('</worksheet>', merge_xml + '</worksheet>')
+
+    last_row = terms_start + len(OFFICIAL_SOFTWARE_TERMS)
+    sheet_xml = re.sub(r'<dimension ref="[^"]*"/>', f'<dimension ref="A1:K{last_row}"/>', sheet_xml)
+
+    files['xl/worksheets/sheet1.xml'] = sheet_xml.encode('utf-8')
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_excel_path)), exist_ok=True)
+    with zipfile.ZipFile(output_excel_path, 'w', compression=zipfile.ZIP_DEFLATED) as z_out:
+        for fname, data in files.items():
+            z_out.writestr(fname, data)
+
+    return True
+
+def generate_master_excel_openpyxl(entries, output_excel_path, manual_city=None, title="MEDIA BUZZ — SITES & MEDIA PORTFOLIO"):
+    """openpyxl-based generator fallback when available."""
+    if not HAS_OPENPYXL or not openpyxl:
+        return False
     try:
         from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
@@ -1642,10 +1811,8 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Sites"
-
         total_cols = 11
 
-        # Row 1: Executive Media Buzz Brand Header
         ws.merge_cells('A1:K1')
         ws.row_dimensions[1].height = 46.0
 
@@ -1663,27 +1830,11 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
             cell.border = header_border
 
         title_cell = ws['A1']
-        title_cell.value = (title or "MEDIA BUZZ — SITES & MEDIA PORTFOLIO").strip()
+        title_cell.value = (title or "MEDIA BUZZ - SITES SPECIFICATION").strip()
         title_cell.font = Font(name='Calibri', size=13, bold=True, color='FFFFC200')
         title_cell.alignment = Alignment(horizontal='center', vertical='center')
 
-        # Add official Media Buzz brand logo on the top right
-        try:
-            from openpyxl.drawing.image import Image
-            img_data = base64.b64decode(MEDIA_BUZZ_LOGO_BASE64)
-            logo_img = Image(io.BytesIO(img_data))
-            logo_img.width = 400
-            logo_img.height = 148
-            # Anchor at Column K (Latitude Longitude), Row 1
-            ws.add_image(logo_img, 'K1')
-        except Exception as img_err:
-            sys.stderr.write(f"[Excel Logo Embed Notice] {img_err}\n")
-
-        # Row 2: Headers matching Jade Blue 16-10-2026.xlsx in Bright Yellow
-        headers = [
-            'SR NO', 'City', 'LOCATION', 'MEDIA', 'LIGHT',
-            'W', 'H', 'SQ FT', 'AVAILABLITY', 'Selling Amount', 'Latitude Longitude'
-        ]
+        headers = ['SR NO', 'City', 'LOCATION', 'MEDIA', 'LIGHT', 'W', 'H', 'SQ FT', 'AVAILABLITY', 'Selling Amount', 'Latitude Longitude']
         ws.append(headers)
         ws.row_dimensions[2].height = 26.0
 
@@ -1704,7 +1855,6 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
             align_h = 'center' if col_idx in [1, 2, 4, 5, 6, 7, 8, 9] else ('right' if col_idx == 10 else 'left')
             cell.alignment = Alignment(horizontal=align_h, vertical='center')
 
-        # Row 3+: Data rows
         data_font = Font(name='Calibri', size=10.5)
         data_border = Border(
             left=Side(style='thin', color='E8E8E8'),
@@ -1715,7 +1865,6 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
 
         for idx, e in enumerate(entries, start=1):
             r_num = idx + 2
-            # Parse dimensions
             size_txt = str(e.get('size') or '').replace('ft', '').replace('FT', '').strip()
             dim_m = re.match(r'(\d+(?:\.\d+)?)\s*[xX*×]\s*(\d+(?:\.\d+)?)', size_txt)
             w_val = e.get('w') or (dim_m.group(1) if dim_m else "")
@@ -1749,69 +1898,67 @@ def generate_master_excel(entries, output_excel_path, manual_city=None, title="M
                 align_h = 'center' if col_idx in [1, 2, 4, 5, 6, 7, 8, 9] else ('right' if col_idx == 10 else 'left')
                 cell.alignment = Alignment(horizontal=align_h, vertical='center')
 
-        # Auto-adjust column widths
         col_widths = {1: 8, 2: 16, 3: 45, 4: 15, 5: 10, 6: 8, 7: 8, 8: 12, 9: 20, 10: 20, 11: 28}
         for col_idx, width in col_widths.items():
             ws.column_dimensions[get_column_letter(col_idx)].width = width
 
-        # Official 7-point Media Buzz software Terms & Conditions at bottom
         terms_start = len(entries) + 4
         ws.merge_cells(start_row=terms_start, start_column=1, end_row=terms_start, end_column=total_cols)
         ws.row_dimensions[terms_start].height = 24.0
         for col_idx in range(1, total_cols + 1):
             cell = ws.cell(row=terms_start, column=col_idx)
             cell.fill = navy_fill
-            cell.border = Border(
-                top=Side(style='thin', color='FF234D7D'),
-                bottom=Side(style='medium', color='FFFFC200'),
-                left=Side(style='thin', color='FF234D7D'),
-                right=Side(style='thin', color='FF234D7D')
-            )
         h_cell = ws.cell(row=terms_start, column=1)
         h_cell.value = "TERMS & CONDITIONS"
         h_cell.font = Font(name='Calibri', size=11, bold=True, color='FFFFC200')
         h_cell.alignment = Alignment(horizontal='center', vertical='center')
 
-        # 7 Term rows with alternating cream/white and official wording
-        term_border_thin = Border(
-            top=Side(style='thin', color='FFE2E8F0'),
-            bottom=Side(style='thin', color='FFE2E8F0'),
-            left=Side(style='thin', color='FFCBD5E1'),
-            right=Side(style='thin', color='FFCBD5E1')
-        )
-        term_border_last = Border(
-            top=Side(style='thin', color='FFE2E8F0'),
-            bottom=Side(style='medium', color='FF071C35'),
-            left=Side(style='thin', color='FFCBD5E1'),
-            right=Side(style='thin', color='FFCBD5E1')
-        )
-
         for t_idx, term_text in enumerate(OFFICIAL_SOFTWARE_TERMS):
             curr_r = terms_start + 1 + t_idx
             ws.merge_cells(start_row=curr_r, start_column=1, end_row=curr_r, end_column=total_cols)
             ws.row_dimensions[curr_r].height = 21.0
-            row_fill = PatternFill(
-                start_color='FFFFFDF5' if t_idx % 2 == 0 else 'FFFFFFFF',
-                end_color='FFFFFDF5' if t_idx % 2 == 0 else 'FFFFFFFF',
-                fill_type='solid'
-            )
-            is_last = (t_idx == len(OFFICIAL_SOFTWARE_TERMS) - 1)
-            r_border = term_border_last if is_last else term_border_thin
-
+            row_fill = PatternFill(start_color='FFFFFDF5' if t_idx % 2 == 0 else 'FFFFFFFF', fill_type='solid')
             for col_idx in range(1, total_cols + 1):
                 cell = ws.cell(row=curr_r, column=col_idx)
                 cell.fill = row_fill
-                cell.border = r_border
-
             t_cell = ws.cell(row=curr_r, column=1)
             t_cell.value = term_text
-            t_cell.font = Font(name='Calibri', size=11, bold=False, color='FF071C35')
+            t_cell.font = Font(name='Calibri', size=11, color='FF071C35')
             t_cell.alignment = Alignment(horizontal='center', vertical='center')
 
         os.makedirs(os.path.dirname(os.path.abspath(output_excel_path)), exist_ok=True)
         wb.save(output_excel_path)
+        return True
     except Exception as exc:
-        sys.stderr.write(f"[Master Excel Gen Error] {exc}\n")
+        sys.stderr.write(f"[openpyxl Gen Notice] {exc}\n")
+        return False
+
+def generate_master_excel(entries, output_excel_path, manual_city=None, title="MEDIA BUZZ - SITES SPECIFICATION"):
+    """
+    Generates an authentic 11-column Master Excel workbook matching Jade Blue 16-10-2026.xlsx format.
+    Uses pure standard library (zipfile + XML) based on master_excel_template.xlsx, ensuring 100% zero-dependency
+    execution on any Linux/cPanel/Hostinger environment without openpyxl or Pillow.
+    Falls back to openpyxl if template is not on disk.
+    """
+    excel_tmpl = find_master_excel_template()
+    if excel_tmpl and os.path.isfile(excel_tmpl):
+        try:
+            if generate_master_excel_pure(entries, output_excel_path, template_excel_path=excel_tmpl, manual_city=manual_city, title=title):
+                if os.path.isfile(output_excel_path):
+                    return
+        except Exception as pure_err:
+            sys.stderr.write(f"[Pure Excel Gen Notice] {pure_err}\n")
+
+    if HAS_OPENPYXL and openpyxl:
+        try:
+            if generate_master_excel_openpyxl(entries, output_excel_path, manual_city=manual_city, title=title):
+                if os.path.isfile(output_excel_path):
+                    return
+        except Exception as o_err:
+            sys.stderr.write(f"[openpyxl Gen Notice] {o_err}\n")
+
+    if not os.path.isfile(output_excel_path):
+        raise RuntimeError(f"Failed to generate standardized Excel file at {output_excel_path}")
 
 def generate_converted_pptx_pure(template_file, output_path, entries, is_excel=False, include_terms=True):
     """Generates the master template presentation with cloned slides and optional official software Terms & Conditions."""
